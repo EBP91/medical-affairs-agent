@@ -37,6 +37,15 @@ from langchain_community.vectorstores import Chroma
 from langchain_core.messages import HumanMessage
 from langchain_core.documents import Document
 
+# --- SICHERHEITS-CHECK ---
+# Einfaches Passwort für die Demo
+password = st.sidebar.text_input("🔒 Bitte Passwort eingeben", type="password")
+
+if password != "Sanofi":  # <-- Hier dein Wunschpasswort eintragen
+    st.info("Bitte gib das Passwort ein, um die App zu nutzen.")
+    st.stop()  # Das hier stoppt die App, bis das Passwort stimmt
+# -------------------------
+
 # ==============================================================================
 # MULTI-LANGUAGE TEMPLATES
 # ==============================================================================
@@ -1178,3 +1187,4 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
