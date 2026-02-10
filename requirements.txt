@@ -7,4 +7,10 @@ langchain-community
 chromadb
 pypdf
 python-dotenv
+
 tiktoken
+langchain-google-genai>=2.0.0
+pydantic>=2.0.0
+langgraph
+streamlit
+chromadb
