@@ -473,51 +473,44 @@ def adverse_event_node(state: AgentState) -> dict:
     }
 
 def retrieve_node(state: AgentState) -> dict:
+    # 1. Variablen vorbereiten
     query = state["question"]
     logs = state.get("logs", []) or []
-    
-    # ... (dein Optimierungscode bleibt gleich)
-    
+    search_query = query  # <--- HIER: Sicherstellen, dass die Variable immer existiert!
+
+    # 2. Query-Optimierung (deine Logik)
+    if len(query) > 30: 
+        logs = add_log(logs, "RETRIEVAL: Starte Query-Optimierung...")
+        system_prompt = (
+            "Extrahiere die medizinischen Kernbegriffe für eine Datenbanksuche. "
+            "Entferne Anrede, Gruß und Füllwörter. "
+            "Behalte Medikamentennamen und Symptome exakt bei."
+        )
+        try:
+            clean_query = llm.invoke([
+                HumanMessage(content=f"{system_prompt}\n\nText: {query}")
+            ]).content.strip()
+            search_query = clean_query 
+            logs = add_log(logs, f"RETRIEVAL: Optimiert zu '{search_query}'")
+        except Exception as e:
+            logs = add_log(logs, f"Optimierung fehlgeschlagen: {str(e)}")
+
+    # 3. Der eigentliche Datenbank-Abruf (mit Fehler-Diagnose)
     try:
-        # Dies ist der kritische Punkt
-        docs = retriever.invoke(search_query)
+        # Falls hier der Google-Fehler passiert, fangen wir ihn ab:
+        docs = retriever.invoke(search_query) 
         logs = add_log(logs, f"RETRIEVAL: {len(docs)} Dokumente gefunden.")
         return {"documents": docs, "logs": logs, "optimized_query": search_query}
     except Exception as e:
-        # Das hier zwingt Streamlit, den ECHTEN Google-Fehler zu zeigen
-        st.error(f"🚨 KRITISCHER EMBEDDING FEHLER: {str(e)}")
-        # Wir werfen den Fehler nicht weiter, damit wir ihn im UI lesen können
-        return {"documents": [], "logs": add_log(logs, f"ERROR: {str(e)}"), "fallback_mode": True}
-        
-#def retrieve_node(state: AgentState) -> dict:
-#    query = state["question"]
-#    logs = state.get("logs", []) or []
-    
-#    search_query = query
-    
-    # Deine Optimierungslogik (wie besprochen)
-#    if len(query) > 30: 
- #       logs = add_log(logs, "RETRIEVAL: Starte Query-Optimierung...")
-#        system_prompt = (
-   #         "Extrahiere die medizinischen Kernbegriffe für eine Datenbanksuche. "
-    #        "Entferne Anrede, Gruß und Füllwörter. "
-    #        "Behalte Medikamentennamen und Symptome exakt bei." # WICHTIG: Kontext bewahren
-    #    )
-    #    try:
-    #        clean_query = llm.invoke([
-    #            HumanMessage(content=f"{system_prompt}\n\nText: {query}")
-     #       ]).content.strip()
-    #        search_query = clean_query
-    #       logs = add_log(logs, f"RETRIEVAL: Optimiert zu '{search_query}'")
-    #    except Exception:
-    #        pass
-
-    # Suche
-#    docs = retriever.invoke(search_query) 
-#    logs = add_log(logs, f"RETRIEVAL: {len(docs)} Dokumente gefunden.")
-    
-    # WICHTIG: optimized_query zurückgeben
-#    return {"documents": docs, "logs": logs, "optimized_query": search_query}
+        # Dies zeigt dir jetzt den WIRKLICHEN Grund (z.B. API Key falsch, Quote voll, etc.)
+        st.error(f"🚨 ECHTER FEHLER VON GOOGLE: {str(e)}")
+        # Wir schalten in den Fallback-Modus, damit die App nicht komplett abstürzt
+        return {
+            "documents": [], 
+            "logs": add_log(logs, f"KRITISCHER FEHLER: {str(e)}"), 
+            "fallback_mode": True,
+            "optimized_query": search_query
+        }
 
 
 def grade_documents_node(state: AgentState) -> dict:
@@ -1195,6 +1188,7 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
