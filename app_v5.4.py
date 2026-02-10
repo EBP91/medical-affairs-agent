@@ -37,6 +37,27 @@ from langchain_community.vectorstores import Chroma
 from langchain_core.messages import HumanMessage
 from langchain_core.documents import Document
 
+# === DIAGNOSE BLOCK START ===
+import google.generativeai as genai
+
+try:
+    # Key laden
+    api_key = os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+    genai.configure(api_key=api_key)
+    
+    st.sidebar.error("🔍 API-DIAGNOSE LÄUFT...")
+    
+    # Modelle abfragen, die Embeddings können
+    models = [m.name for m in genai.list_models() if 'embedContent' in m.supported_generation_methods]
+    
+    if not models:
+        st.sidebar.error("❌ KEINE Embedding-Modelle gefunden! API deaktiviert?")
+    else:
+        st.sidebar.success(f"✅ Verfügbare Modelle: {models}")
+except Exception as e:
+    st.sidebar.error(f"❌ Diagnose fehlgeschlagen: {e}")
+# === DIAGNOSE BLOCK ENDE ===
+
 
 # ==============================================================================
 # MULTI-LANGUAGE TEMPLATES
@@ -1188,6 +1209,7 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
