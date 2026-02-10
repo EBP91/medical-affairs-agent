@@ -283,7 +283,7 @@ if not os.path.exists(DB_FOLDER):
 llm = ChatGoogleGenerativeAI(
     model="gemma-3-27b-it", 
     temperature=0,
-    google_api_key=os.getenv("GOOGLE_API_KEY")
+    google_api_key=os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
 )
 
 
@@ -291,7 +291,7 @@ llm = ChatGoogleGenerativeAI(
 #embeddings = OpenAIEmbeddings()
 embeddings = GoogleGenerativeAIEmbeddings(
     model="models/text-embedding-004",
-    google_api_key=os.getenv("GOOGLE_API_KEY")
+    google_api_key=os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
 )
 vectorstore = Chroma(persist_directory=DB_FOLDER, embedding_function=embeddings)
 retriever = vectorstore.as_retriever(search_kwargs={"k": 3})  # Top-3 Dokumente
@@ -1179,5 +1179,6 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
