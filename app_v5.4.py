@@ -66,15 +66,19 @@ TEMPLATES = {
 # TEST SCENARIOS (Für Dropdown)
 # ==============================================================================
 
+# Standardfrage für den Start
+DEFAULT_QUESTION = (
+    "Sehr geehrter Herr Dr. Preuß,\n\n"
+    "Wir haben einem Säugling Espumisan gegeben. Kurz darauf bekam das Kind Atemnot. Sind diese Nebenwirkungen bekannt?\n\n"
+    "Bitte um Rückmeldung.\n\n"
+    "Mit freundlichen Grüßen,\n"
+    "Dr. Anna Müller"
+)
+
 SCENARIOS = {
     "--- Bitte wählen (oder selbst tippen) ---": "",
     
-    "Szenario A: Nebenwirkung (Espumisan)": (
-        "Sehr geehrter Herr Dr. Preuß,\n\n"
-        "Wir haben einem Säugling Espumisan gegeben. Kurz darauf bekam das Kind Atemnot. Sind diese Nebenwirkungen bekannt?\n\n"
-        "Bitte um Rückmeldung.\n\n"
-        "Mit freundlichen Grüßen,\nDr. Anna Müller"
-    ),
+    "Szenario A: Nebenwirkung (Espumisan)": DEFAULT_QUESTION,
     
     "Szenario B: Medizinische Info (Dosierung)": (
         "Hallo Medical Team,\n\n"
@@ -309,9 +313,8 @@ llm = ChatGoogleGenerativeAI(
 
 
 # Vektordatenbank und Retriever initialisieren
-# WICHTIG: Hier nutzen wir das korrekte Gemini-Embedding-Modell
 embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/gemini-embedding-001", # <--- FIX INTEGRIERT
+    model="models/gemini-embedding-001", 
     google_api_key=os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
 )
 vectorstore = Chroma(persist_directory=DB_FOLDER, embedding_function=embeddings)
@@ -713,10 +716,8 @@ app = workflow.compile()
 with st.sidebar:
     st.header("⚙️ System-Status")
     
-    # === ÄNDERUNG: KOMPAKTER STATUS ===
     st.success("✅ **Datenbank:** Aktiv")
     st.info("🤖 **LLM:** gemma-3-27b-it")
-    # ==================================
     
     st.caption(f"📂 DB-Pfad: `{DB_FOLDER}`")
     
@@ -799,37 +800,35 @@ with st.expander("ℹ️ Funktionsweise: Prozess-Grafik anzeigen", expanded=Fals
         st.error(f"Bild nicht gefunden! Das Skript sucht hier: {image_path}")
 
 # ==============================================================================
-# INPUT BEREICH (MIT SZENARIEN-DROPDOWN)
+# INPUT BEREICH (MIT CALLBACK-LOGIK)
 # ==============================================================================
 st.subheader("📝 Ihre Anfrage")
 
+# Initialisiere session_state für email_input, falls noch nicht vorhanden
+if "email_input" not in st.session_state:
+    st.session_state["email_input"] = DEFAULT_QUESTION
+
+# Callback Funktion für das Dropdown
+def update_input():
+    selection = st.session_state.scenario_select
+    if selection in SCENARIOS and selection != "--- Bitte wählen (oder selbst tippen) ---":
+        st.session_state.email_input = SCENARIOS[selection]
+
 # Dropdown zur Szenarien-Auswahl
-selected_scenario = st.selectbox(
+st.selectbox(
     "📋 Test-Szenario wählen (optional):",
     list(SCENARIOS.keys()),
+    key="scenario_select", # WICHTIG: Eigener Key für das Widget
+    on_change=update_input, # WICHTIG: Callback feuert, sobald man etwas auswählt
     index=0
 )
 
-# Text ermitteln (Entweder Auswahl oder Standard-Test)
-if selected_scenario != "--- Bitte wählen (oder selbst tippen) ---":
-    input_text_value = SCENARIOS[selected_scenario]
-else:
-    # Wenn nichts gewählt ist, zeigen wir nichts (oder den alten Default) an
-    # Hier lassen wir es leer oder nutzen den letzten State, falls gewünscht.
-    # Für Demo-Zwecke ist es oft besser, wenn es leer startet oder einen Default hat.
-    # Wir nehmen hier den ersten Default-Text nur beim allerersten Laden.
-    if "email_input" not in st.session_state:
-        input_text_value = SCENARIOS["Szenario A: Nebenwirkung (Espumisan)"]
-    else:
-        input_text_value = st.session_state.get("email_input", "")
-
-# Text Area
+# Text Area - WICHTIG: Kein "value=...", sondern nur der Key!
 email_input = st.text_area(
     "Geben Sie hier die Anfrage ein:", 
     height=150, 
-    value=input_text_value,
-    placeholder="Beschreiben Sie Ihre medizinische Anfrage oder Nebenwirkungsmeldung...",
-    key="email_input" # Wichtig für State Management
+    key="email_input", # Streamlit managed den Inhalt jetzt automatisch über diesen Key
+    placeholder="Beschreiben Sie Ihre medizinische Anfrage oder Nebenwirkungsmeldung..."
 )
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -839,7 +838,7 @@ with col2:
 
 if submit_button:
     initial_state: AgentState = {
-        "question": email_input,
+        "question": email_input, # Hier holen wir den Wert aus der Variable
         "revision_count": 0,
         "logs": [],
         "fallback_mode": False,
