@@ -792,12 +792,16 @@ st.markdown("""
 
 # Bild Logik
 script_directory = os.path.dirname(os.path.abspath(__file__))
-image_path = os.path.join(script_directory, "Der KI-Assistent für Medical Affairs_Infografik.png")
+
+# HIER ÄNDERN: Neuer, einfacher Name
+image_path = os.path.join(script_directory, "infografik.png") 
+
 with st.expander("ℹ️ Funktionsweise: Prozess-Grafik anzeigen", expanded=False):
     if os.path.exists(image_path):
         st.image(image_path, caption="Der Workflow des Agenten im Detail", use_container_width=True)
     else:
-        st.error(f"Bild nicht gefunden! Das Skript sucht hier: {image_path}")
+        # Falls es immer noch fehlt, zeigen wir eine schönere Fehlermeldung
+        st.warning("Hinweis: Die Infografik wurde noch nicht geladen.")
 
 # ==============================================================================
 # INPUT BEREICH (MIT CALLBACK-LOGIK)
@@ -1017,3 +1021,4 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
