@@ -290,7 +290,7 @@ llm = ChatGoogleGenerativeAI(
 # Vektordatenbank und Retriever initialisieren
 #embeddings = OpenAIEmbeddings()
 embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/embedding-001",
+    model="models/gemini-embedding-001",
     google_api_key=os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
 )
 vectorstore = Chroma(persist_directory=DB_FOLDER, embedding_function=embeddings)
@@ -1188,6 +1188,7 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
