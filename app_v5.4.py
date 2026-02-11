@@ -12,6 +12,7 @@ Features:
 - Iterative Qualitätskontrolle durch Critique-Loop
 - Fallback-Modus bei fehlenden Quelldokumenten
 - Vollständiges Audit-Logging mit Timestamps
+- Test-Szenarien Auswahl für Demo-Zwecke
 
 Abhängigkeiten:
 ---------------
@@ -62,18 +63,47 @@ TEMPLATES = {
 }
 
 # ==============================================================================
+# TEST SCENARIOS (Für Dropdown)
+# ==============================================================================
+
+SCENARIOS = {
+    "--- Bitte wählen (oder selbst tippen) ---": "",
+    
+    "Szenario A: Nebenwirkung (Espumisan)": (
+        "Sehr geehrter Herr Dr. Preuß,\n\n"
+        "Wir haben einem Säugling Espumisan gegeben. Kurz darauf bekam das Kind Atemnot. Sind diese Nebenwirkungen bekannt?\n\n"
+        "Bitte um Rückmeldung.\n\n"
+        "Mit freundlichen Grüßen,\nDr. Anna Müller"
+    ),
+    
+    "Szenario B: Medizinische Info (Dosierung)": (
+        "Hallo Medical Team,\n\n"
+        "ich bräuchte Informationen zur maximalen Tagesdosis von Espumisan für Erwachsene vor einer Gastroskopie.\n"
+        "Gibt es da spezielle Vorgaben?\n\n"
+        "Danke und Gruß,\nThomas Meier, Apotheker"
+    ),
+    
+    "Szenario C: Hybrid (NW + Frage)": (
+        "Guten Tag,\n\n"
+        "mein Patient klagt über Hautausschlag nach der Einnahme. Ist das normal?\n"
+        "Außerdem wüsste ich gerne, ob man das Medikament in der Schwangerschaft geben darf.\n\n"
+        "MfG, Dr. S. Klein"
+    ),
+    
+    "Szenario D: Irrelevant / Spam": (
+        "Hi,\n\n"
+        "wollte nur mal fragen, wann eure Kantine heute aufmacht?\n\n"
+        "LG Peter"
+    )
+}
+
+# ==============================================================================
 # CUSTOM CSS STYLING
 # ==============================================================================
 
 def apply_custom_css():
     """
     Wendet benutzerdefiniertes CSS für ein professionelles medizinisches Design an.
-    
-    Features:
-    - Medizinisches Farbschema (Blau/Grün-Töne)
-    - Verbesserte Buttons mit Hover-Effekten
-    - Optimierte Cards und Expander
-    - Professionelle Typografie
     """
     st.markdown("""
         <style>
@@ -183,7 +213,8 @@ def apply_custom_css():
         [data-testid="stSidebar"] h1,
         [data-testid="stSidebar"] h2,
         [data-testid="stSidebar"] h3,
-        [data-testid="stSidebar"] p {
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] label {
             color: white;
         }
         
@@ -219,13 +250,12 @@ def apply_custom_css():
         /* Code Block Styling */
         .stMarkdown pre {
             background: #1e293b;
-            color: #f8fafc; /* NEU: Helle Textfarbe für Kontrast */
+            color: #f8fafc; 
             border-radius: 8px;
             padding: 1rem;
             border-left: 4px solid #3b82f6;
         }
         
-        /* NEU: Sicherstellen, dass auch das innere Code-Element hell ist */
         .stMarkdown pre code {
             color: #f8fafc;
         }
@@ -247,15 +277,6 @@ def apply_custom_css():
 PAGE_TITLE = "Demo: MedAffairs AI Agent v5.4"
 DB_FOLDER = "chroma_db"  # Pfad zur Chroma-Vektordatenbank
 REPORT_FOLDER = "reports"  # Ordner für Log-Dateien
-
-# Standardfrage für Testzwecke
-DEFAULT_QUESTION = (
-    "Sehr geehrter Herr Dr. Preuß,\n\n"
-    "Wir haben einem Säugling Espumisan gegeben. Kurz darauf bekam das Kind Atemnot. Sind diese Nebenwirkungen bekannt?\n\n"
-    "Bitte um Rückmeldung.\n\n"
-    "Mit freundlichen Grüßen,\n"
-    "Dr. Anna Müller"
-)
 
 # Streamlit-Konfiguration
 st.set_page_config(
@@ -288,9 +309,9 @@ llm = ChatGoogleGenerativeAI(
 
 
 # Vektordatenbank und Retriever initialisieren
-#embeddings = OpenAIEmbeddings()
+# WICHTIG: Hier nutzen wir das korrekte Gemini-Embedding-Modell
 embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/gemini-embedding-001",
+    model="models/gemini-embedding-001", # <--- FIX INTEGRIERT
     google_api_key=os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
 )
 vectorstore = Chroma(persist_directory=DB_FOLDER, embedding_function=embeddings)
@@ -304,19 +325,6 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": 3})  # Top-3 Dokumente
 class AgentState(TypedDict):
     """
     Zentrale State-Struktur für den LangGraph-Workflow.
-    
-    Attributes:
-        question: Die ursprüngliche Nutzer-Anfrage
-        category: Klassifizierte Kategorie (ADVERSE_EVENT_ONLY, HYBRID, MEDICAL_INFO, OTHER)
-        context: Zusammengeführter Text aus relevanten Dokumenten
-        documents: Liste der geladenen Document-Objekte
-        source_names: Dateinamen der verwendeten Quellen
-        draft: Generierter E-Mail-Entwurf
-        critique: Feedback vom Critique-Node (PASS oder Fehlerbeschreibung)
-        revision_count: Anzahl der Draft-Iterationen
-        logs: Liste aller Workflow-Logs mit Timestamps
-        fallback_mode: True, wenn keine DB-Dokumente gefunden wurden
-        has_ae_component: True, wenn Adverse-Event-Komponente erkannt wurde
     """
     question: str
     category: str
@@ -336,13 +344,6 @@ class AgentState(TypedDict):
 def add_log(current_logs: List[str] | None, message: str) -> List[str]:
     """
     Fügt einen Zeitstempel-versehenen Log-Eintrag hinzu.
-    
-    Args:
-        current_logs: Bestehende Log-Liste (kann None sein)
-        message: Log-Nachricht
-        
-    Returns:
-        Aktualisierte Log-Liste mit neuem Eintrag
     """
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     return (current_logs or []) + [f"[{timestamp}] {message}"]
@@ -352,12 +353,10 @@ def add_log(current_logs: List[str] | None, message: str) -> List[str]:
 # 3. NODE DEFINITIONS (Graph-Knoten)
 # ==============================================================================
 
-def determine_salutation(email_text: str, language: str = "DE") -> str: # <--- language hinzugefügt
+def determine_salutation(email_text: str, language: str = "DE") -> str:
     """
     Extrahiert den Namen des ABSENDERS (Signatur) und erstellt eine Anrede.
-    Ignoriert explizit den Namen in der Begrüßung (Empfänger).
     """
-    # Sprach-Anweisung definieren
     lang_instruction = (
         "Erstelle eine deutsche Anrede (z.B. 'Sehr geehrte Frau Müller,')." 
         if language == "DE" 
@@ -393,14 +392,9 @@ def determine_salutation(email_text: str, language: str = "DE") -> str: # <--- l
         return TEMPLATES[language]["salutation_fallback"]
 
 def triage_node(state: AgentState) -> dict:
-    """
-    Klassifiziert die Anfrage in eine von vier Kategorien.
-    """
     question = state["question"]
-    # HIER WAR DER FEHLER: Am Ende fehlte die Klammer )
     logs = add_log(state.get("logs"), "TRIAGE: Analysiere Intent & Sprache...") 
 
-    # Prompt für LLM-basierte Klassifikation
     prompt = f"""
     Du bist ein Compliance-Offizier. Kategorisiere die Anfrage in genau EINE Kategorie:
     Aufgabe 1: Bestimme die KATEGORIE der Anfrage basierend auf folgendem Schema:
@@ -418,7 +412,6 @@ def triage_node(state: AgentState) -> dict:
     response = llm.invoke([HumanMessage(content=prompt)])
     content = response.content.strip()
     
-    # Parsing der Antwort "KATEGORIE | SPRACHE"
     try:
         parts = content.split("|")
         category = parts[0].strip()
@@ -439,30 +432,17 @@ def triage_node(state: AgentState) -> dict:
 
 
 def adverse_event_node(state: AgentState) -> dict:
-    """
-    Erstellt Standardantwort für reine Nebenwirkungsmeldungen ohne Frage.
-    
-    Diese Anfragen erfordern keine inhaltliche Recherche, sondern nur 
-    eine Bestätigung und Weiterleitung an Pharmacovigilance.
-    
-    Args:
-        state: Aktueller Agent-State
-        
-    Returns:
-        Dict mit draft (Standardtext) und aktualisiertem Log
-    """
     question = state["question"]
-    lang = state.get("language", "DE") # Sprache laden
+    lang = state.get("language", "DE") 
     logs = add_log(state.get("logs"), "ADVERSE EVENT: Generiere Bestätigung...")
 
     txt = TEMPLATES[lang]
     salutation = determine_salutation(question, lang)
 
-    # Text zusammenbauen aus Templates
     response_text = (
         f"{salutation}\n\n"
         f"{txt['header']}\n\n"
-        f"{txt['ae_intro']}\n\n" # Hier endet es, da keine Frage beantwortet wird
+        f"{txt['ae_intro']}\n\n" 
         f"{txt['footer']}"
     )
 
@@ -473,12 +453,10 @@ def adverse_event_node(state: AgentState) -> dict:
     }
 
 def retrieve_node(state: AgentState) -> dict:
-    # 1. Variablen vorbereiten
     query = state["question"]
     logs = state.get("logs", []) or []
-    search_query = query  # <--- HIER: Sicherstellen, dass die Variable immer existiert!
+    search_query = query 
 
-    # 2. Query-Optimierung (deine Logik)
     if len(query) > 30: 
         logs = add_log(logs, "RETRIEVAL: Starte Query-Optimierung...")
         system_prompt = (
@@ -495,16 +473,12 @@ def retrieve_node(state: AgentState) -> dict:
         except Exception as e:
             logs = add_log(logs, f"Optimierung fehlgeschlagen: {str(e)}")
 
-    # 3. Der eigentliche Datenbank-Abruf (mit Fehler-Diagnose)
     try:
-        # Falls hier der Google-Fehler passiert, fangen wir ihn ab:
         docs = retriever.invoke(search_query) 
         logs = add_log(logs, f"RETRIEVAL: {len(docs)} Dokumente gefunden.")
         return {"documents": docs, "logs": logs, "optimized_query": search_query}
     except Exception as e:
-        # Dies zeigt dir jetzt den WIRKLICHEN Grund (z.B. API Key falsch, Quote voll, etc.)
         st.error(f"🚨 ECHTER FEHLER VON GOOGLE: {str(e)}")
-        # Wir schalten in den Fallback-Modus, damit die App nicht komplett abstürzt
         return {
             "documents": [], 
             "logs": add_log(logs, f"KRITISCHER FEHLER: {str(e)}"), 
@@ -515,8 +489,6 @@ def retrieve_node(state: AgentState) -> dict:
 
 def grade_documents_node(state: AgentState) -> dict:
     question = state["question"]
-    # Nutze hier auch die optimierte Query, falls die Originalfrage zu "dreckig" ist
-    # Das hilft dem Grader oft, den Fokus zu behalten:
     target_query = state.get("optimized_query", question)
     
     documents = state.get("documents", [])
@@ -524,7 +496,6 @@ def grade_documents_node(state: AgentState) -> dict:
     filtered_docs = []
 
     for i, doc in enumerate(documents):
-        # Prompt zwingt LLM zu einer Begründung
         prompt = f"""
         Du bist ein strenger Prüfer. 
         Frage: {target_query}
@@ -538,10 +509,8 @@ def grade_documents_node(state: AgentState) -> dict:
             response = llm.invoke([HumanMessage(content=prompt)])
             content = response.content.strip()
             
-            # Einfaches Parsing (robuster als json.loads bei einfachen LLM Antworten)
             is_relevant = "JA" in content or '"score": "JA"' in content
             
-            # Logge die Entscheidung für jedes Dokument
             doc_snippet = doc.page_content[:30].replace("\n", " ")
             logs = add_log(logs, f"GRADING Doc #{i+1} ({doc_snippet}...): {content}")
 
@@ -571,70 +540,30 @@ def grade_documents_node(state: AgentState) -> dict:
 
 
 def build_instruction(critique: str | None) -> str:
-    """
-    Erstellt Prompt-Instruction für Draft-Node.
-    
-    Die Instruction definiert, dass nur der inhaltliche Body geschrieben 
-    werden soll (keine Anrede/Grußformel). Bei vorliegender Kritik wird 
-    diese in die Instruction integriert.
-    
-    Args:
-        critique: Feedback vom Critique-Node (None oder String)
-        
-    Returns:
-        Vollständige Instruction für das LLM
-    """
     base = (
         "Formuliere NUR den inhaltlichen Antwort-Absatz (Body) auf die Frage. "
         "Schreibe KEINE Anrede ('Sehr geehrte...'), KEINE Einleitung ('Vielen Dank...') "
         "und KEINE Grußformel am Ende. Das übernimmt das System. "
         "Konzentriere dich rein auf die medizinische/sachliche Antwort."
     )
-    # Bei vorhandener Kritik: Diese zur Verbesserung hinzufügen
     if critique and critique != "PASS":
         return base + f" Kritik umsetzen: {critique}"
     return base
 
 
 def draft_node(state: AgentState) -> dict:
-    """
-    Generiert den E-Mail-Entwurf basierend auf Kontext oder Allgemeinwissen.
-    
-    Workflow:
-    ---------
-    1. LLM generiert nur inhaltlichen Body (ohne Anrede/Grußformel)
-    2. System fügt Standardelemente hinzu:
-       - Header (Anrede + Dank)
-       - AE-Block (bei has_ae_component=True)
-       - Fallback-Warnung (bei fallback_mode=True)
-       - Body (vom LLM generiert)
-       - Footer (Grußformel)
-    
-    Args:
-        state: Aktueller Agent-State
-        
-    Returns:
-        Dict mit:
-        - draft: Vollständiger E-Mail-Text
-        - revision_count: Inkrementierter Zähler
-        - logs: Aktualisiertes Log
-    """
     question = state["question"]
     context = state.get("context", "")
     critique = state.get("critique", "")
     fallback = state.get("fallback_mode", False)
     has_ae = state.get("has_ae_component", False)
-    # Sprache laden (Default DE falls leer)
     lang = state.get("language", "DE") 
     
     logs = add_log(state.get("logs"), f"DRAFT: Erstelle Antwort ({lang})...")
     
-    # Templates für die aktuelle Sprache laden
     txt = TEMPLATES[lang]
-
-    # Instruction anpassen für LLM
     instruction = build_instruction(critique)
-    lang_prompt = f"Antworte in der Sprache: {lang}. " # <--- WICHTIG für das LLM
+    lang_prompt = f"Antworte in der Sprache: {lang}. "
 
     if fallback:
         prompt = f"""
@@ -654,9 +583,6 @@ def draft_node(state: AgentState) -> dict:
     response = llm.invoke([HumanMessage(content=prompt)])
     body_text = response.content.strip()
 
-    # === ZUSAMMENBAU MIT TEMPLATES ===
-    
-    # 1. Anrede (Sprache übergeben!)
     salutation = determine_salutation(question, lang)
 
     header = f"{salutation}\n\n{txt['header']}\n\n"
@@ -681,34 +607,17 @@ def draft_node(state: AgentState) -> dict:
 
 
 def critique_node(state: AgentState) -> dict:
-    """
-    Prüft die Qualität des generierten Entwurfs.
-    
-    Kriterien unterscheiden sich je nach Modus:
-    - Fallback: Prüfung auf Vollständigkeit und Flüssigkeit
-    - Normal: Prüfung auf Belegbarkeit durch Kontext und Halluzinationen
-    
-    Args:
-        state: Aktueller Agent-State
-        
-    Returns:
-        Dict mit:
-        - critique: "PASS" oder detaillierte Fehlerbeschreibung
-        - logs: Aktualisiertes Log
-    """
     draft = state["draft"]
     question = state["question"]
     fallback = state.get("fallback_mode", False)
     logs = state.get("logs", [])
 
-    # Kriterien je nach Modus
     criteria = (
         "1. Wurde die Frage beantwortet? 2. Klingt der Text flüssig?"
         if fallback
         else "1. Sind alle Aussagen durch den Kontext belegt? 2. Keine Halluzinationen? 3. Werden Nebenwirkungen korrekt an PV verwiesen?"
     )
 
-    # Prompt fordert nun Begründung UND Urteil
     prompt = f"""
     Du bist ein Senior Medical Reviewer. Prüfe den E-Mail Entwurf streng.
     
@@ -724,7 +633,6 @@ def critique_node(state: AgentState) -> dict:
     response = llm.invoke([HumanMessage(content=prompt)])
     content = response.content.strip()
 
-    # Wir parsen die Antwort (einfaches String-Splitting)
     reasoning = "Keine Begründung generiert."
     verdict = "FAIL"
 
@@ -733,12 +641,10 @@ def critique_node(state: AgentState) -> dict:
         reasoning = parts[0].replace("REASONING:", "").strip()
         verdict = parts[1].strip()
     else:
-        verdict = content # Fallback, falls Format nicht eingehalten wird
+        verdict = content 
 
-    # 1. Logge die detaillierte Begründung (für den File-Download)
     logs = add_log(logs, f"CRITIQUE DETAIL: {reasoning}")
     
-    # 2. Logge das kurze Ergebnis (für den Workflow)
     if "PASS" in verdict:
         logs = add_log(logs, "CRITIQUE RESULT: ✅ PASS")
         final_critique = "PASS"
@@ -753,10 +659,8 @@ def critique_node(state: AgentState) -> dict:
 # 4. GRAPH CONSTRUCTION (LangGraph State Machine)
 # ==============================================================================
 
-# Graph initialisieren
 workflow = StateGraph(AgentState)
 
-# Alle Nodes registrieren
 workflow.add_node("triage", triage_node)
 workflow.add_node("adverse_event", adverse_event_node)
 workflow.add_node("retrieve", retrieve_node)
@@ -764,25 +668,9 @@ workflow.add_node("grade_documents", grade_documents_node)
 workflow.add_node("draft", draft_node)
 workflow.add_node("critique", critique_node)
 
-# Einstiegspunkt definieren
 workflow.set_entry_point("triage")
 
-
 def check_triage(state: AgentState) -> str:
-    """
-    Routing-Funktion nach Triage-Node.
-    
-    Entscheidet basierend auf Kategorie, wohin der Flow weitergeht:
-    - ADVERSE_EVENT_ONLY → adverse_event (Standardantwort)
-    - HYBRID/MEDICAL_INFO → retrieve (RAG-Pipeline)
-    - OTHER → end (Abbruch)
-    
-    Args:
-        state: Aktueller Agent-State
-        
-    Returns:
-        String mit Routing-Ziel ("go_ae_only", "go_retrieve", "end")
-    """
     cat = state.get("category", "OTHER")
     if cat == "ADVERSE_EVENT_ONLY":
         return "go_ae_only"
@@ -790,50 +678,30 @@ def check_triage(state: AgentState) -> str:
         return "go_retrieve"
     if cat == "OTHER":
         return "end"
-    return "go_retrieve"  # Fallback
+    return "go_retrieve" 
 
-
-# Conditional Edge nach Triage
 workflow.add_conditional_edges(
     "triage",
     check_triage,
     {"end": END, "go_ae_only": "adverse_event", "go_retrieve": "retrieve"},
 )
 
-# Lineare Edges für Hauptpfade
-workflow.add_edge("adverse_event", END)  # AE-Only → direkt Ende
-workflow.add_edge("retrieve", "grade_documents")  # Retrieve → Grading
-workflow.add_edge("grade_documents", "draft")  # Grading → Draft
-workflow.add_edge("draft", "critique")  # Draft → Critique
-
+workflow.add_edge("adverse_event", END) 
+workflow.add_edge("retrieve", "grade_documents") 
+workflow.add_edge("grade_documents", "draft") 
+workflow.add_edge("draft", "critique") 
 
 def check_critique(state: AgentState) -> str:
-    """
-    Routing-Funktion nach Critique-Node.
-    
-    Entscheidet, ob weitere Revision nötig ist oder Workflow beendet wird:
-    - PASS oder max. 2 Revisionen erreicht → end
-    - Sonst → retry (zurück zu Draft)
-    
-    Args:
-        state: Aktueller Agent-State
-        
-    Returns:
-        String mit Routing-Ziel ("end", "retry")
-    """
     if state.get("revision_count", 0) > 2 or state.get("critique") == "PASS":
         return "end"
     return "retry"
 
-
-# Conditional Edge nach Critique (mit Retry-Loop)
 workflow.add_conditional_edges(
     "critique",
     check_critique,
     {"retry": "draft", "end": END},
 )
 
-# Graph kompilieren (erstellt ausführbare State Machine)
 app = workflow.compile()
 
 
@@ -845,43 +713,33 @@ app = workflow.compile()
 with st.sidebar:
     st.header("⚙️ System-Status")
     
-    # Status-Metriken in schönen Karten
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("🗄️ Datenbank", "Aktiv", delta="OK")
-    with col2:
-        st.metric("🤖 LLM", "gemma-3-27b-it", delta="Online")
+    # === ÄNDERUNG: KOMPAKTER STATUS ===
+    st.success("✅ **Datenbank:** Aktiv")
+    st.info("🤖 **LLM:** gemma-3-27b-it")
+    # ==================================
     
-    st.info(f"📂 DB-Pfad: `{DB_FOLDER}`")
+    st.caption(f"📂 DB-Pfad: `{DB_FOLDER}`")
     
     st.markdown("---")
     st.subheader("📊 Workflow-Struktur")
     
-    # === HIER BEGINNT DER NEUE TEIL ===
-    
-    # Graphviz Visualisierung
     workflow_graph = """
     digraph {
-        // Layout-Einstellungen
         rankdir=TB;
         node [shape=box, style="filled,rounded", fontname="Arial", fontsize=10, margin=0.2];
         edge [fontsize=9, fontname="Arial", color="#64748b"];
 
-        // --- KNOTEN DEFINITIONEN ---
         START [shape=circle, label="Start", fillcolor="#e2e8f0", width=0.8];
         END [shape=doublecircle, label="Ende", fillcolor="#e2e8f0", width=0.8];
 
-        // Entscheidungsknoten (Raute)
         TRIAGE [shape=diamond, label="Triage\n(Intent)", fillcolor="#bfdbfe", color="#1e3a8a"];
         CRITIQUE [shape=diamond, label="Critique\n(Qualität)", fillcolor="#fef08a", color="#854d0e"];
         GRADE [shape=diamond, label="Grading\n(Relevanz)", fillcolor="#dcfce7", color="#166534"];
 
-        // Aktionsknoten (Box)
         AE_NODE [label="🚑 Adverse Event\n(Meldung an PV)", fillcolor="#fee2e2", color="#991b1b"];
         RETRIEVE [label="🔍 Retrieval\n(DB Suche)", fillcolor="#f1f5f9", color="#475569"];
         DRAFT [label="✍️ Draft\n(Antwort)", fillcolor="#dbeafe", color="#1e40af"];
 
-        // --- KANTEN / LOGIK ---
         START -> TRIAGE;
         
         TRIAGE -> AE_NODE [label="Nebenwirkung", color="#ef4444", fontcolor="#ef4444", penwidth=2];
@@ -900,14 +758,11 @@ with st.sidebar:
     }
     """
     
-    # Rendern des Graphen
     with st.expander("🔍 Workflow ansehen", expanded=False):
         st.graphviz_chart(workflow_graph, use_container_width=True)
     
     st.caption("🔵 Triage | 🔴 PV-Meldung | 🟢 RAG-Prozess | 🟡 Quality-Check")
     
-    # === HIER ENDET DER NEUE TEIL ===
-
     st.markdown("---")
     st.markdown("### 📖 Kategorien")
     st.markdown("""
@@ -934,44 +789,55 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Import (falls noch nicht oben im Skript vorhanden)
-import os 
-
-# 1. Wir ermitteln den Ordner, in dem dein Skript (app_v5.4.py) liegt
+# Bild Logik
 script_directory = os.path.dirname(os.path.abspath(__file__))
-
-# 2. Wir bauen den vollen Pfad zum Bild
 image_path = os.path.join(script_directory, "Der KI-Assistent für Medical Affairs_Infografik.png")
-
-# 3. Einfügen in die App mit Sicherheits-Check
 with st.expander("ℹ️ Funktionsweise: Prozess-Grafik anzeigen", expanded=False):
     if os.path.exists(image_path):
-        st.image(image_path, 
-                 caption="Der Workflow des Agenten im Detail", 
-                 use_container_width=True)
+        st.image(image_path, caption="Der Workflow des Agenten im Detail", use_container_width=True)
     else:
-        # Falls es immer noch nicht geht, zeigt uns diese Fehlermeldung, wo Python gesucht hat
         st.error(f"Bild nicht gefunden! Das Skript sucht hier: {image_path}")
-# -------------------------
 
-
-# Eingabebereich mit verbessertem Layout
+# ==============================================================================
+# INPUT BEREICH (MIT SZENARIEN-DROPDOWN)
+# ==============================================================================
 st.subheader("📝 Ihre Anfrage")
+
+# Dropdown zur Szenarien-Auswahl
+selected_scenario = st.selectbox(
+    "📋 Test-Szenario wählen (optional):",
+    list(SCENARIOS.keys()),
+    index=0
+)
+
+# Text ermitteln (Entweder Auswahl oder Standard-Test)
+if selected_scenario != "--- Bitte wählen (oder selbst tippen) ---":
+    input_text_value = SCENARIOS[selected_scenario]
+else:
+    # Wenn nichts gewählt ist, zeigen wir nichts (oder den alten Default) an
+    # Hier lassen wir es leer oder nutzen den letzten State, falls gewünscht.
+    # Für Demo-Zwecke ist es oft besser, wenn es leer startet oder einen Default hat.
+    # Wir nehmen hier den ersten Default-Text nur beim allerersten Laden.
+    if "email_input" not in st.session_state:
+        input_text_value = SCENARIOS["Szenario A: Nebenwirkung (Espumisan)"]
+    else:
+        input_text_value = st.session_state.get("email_input", "")
+
+# Text Area
 email_input = st.text_area(
     "Geben Sie hier die Anfrage ein:", 
     height=150, 
-    value=DEFAULT_QUESTION,
-    placeholder="Beschreiben Sie Ihre medizinische Anfrage oder Nebenwirkungsmeldung..."
+    value=input_text_value,
+    placeholder="Beschreiben Sie Ihre medizinische Anfrage oder Nebenwirkungsmeldung...",
+    key="email_input" # Wichtig für State Management
 )
 
-# Button zum Starten des Workflows mit verbessertem Spacing
 st.markdown("<br>", unsafe_allow_html=True)
 col1, col2, col3 = st.columns([2, 1, 2])
 with col2:
     submit_button = st.button("🚀 Anfrage senden", use_container_width=True, type="primary")
 
 if submit_button:
-    # Initial State mit allen Pflichtfeldern vorbelegen
     initial_state: AgentState = {
         "question": email_input,
         "revision_count": 0,
@@ -986,70 +852,55 @@ if submit_button:
         "critique": "",
     }
     
-    # Workflow ausführen mit Spinner-Anzeige
     with st.spinner("🔄 Agent analysiert und formuliert Antwort..."):
         result = app.invoke(initial_state)
         st.session_state["result"] = result
 
-# ... nach st.session_state["result"] = result ...
+# ... ab hier bleibt der Code gleich für die Anzeige ...
 
 if "result" in st.session_state:
     res = st.session_state["result"]
     
-    # === NEUER DEBUG BEREICH ===
+    # === DEBUG DASHBOARD ===
     st.markdown("---")
     st.subheader("🕵️‍♂️ Debugging Dashboard")
     
-    # 1. Query Vergleich
     d_col1, d_col2 = st.columns(2)
     with d_col1:
         st.markdown("**Original Anfrage:**")
         st.info(res.get("question", ""))
     with d_col2:
         st.markdown("**Optimierte DB-Query:**")
-        # Rot markieren, wenn sie leer oder seltsam ist
         opt_q = res.get("optimized_query", "N/A")
         if not opt_q or len(opt_q) < 3:
             st.error(f"⚠️ Warnung: '{opt_q}'")
         else:
             st.success(f"'{opt_q}'")
 
-# 2. Grading Entscheidungen visualisieren
     with st.expander("🔍 Detaillierte Filter-Protokolle (Grading)", expanded=True):
-        # Wir filtern die Logs nach Grading-Einträgen
         grading_logs = [l for l in res.get("logs", []) if "GRADING" in l]
         
         for log in grading_logs:
-            # Bereinigung: Entferne Markdown-Code-Zeichen aus dem Log-Text für die Anzeige
             clean_log = log.replace("```json", "").replace("```", "").replace("{", "(\n  ").replace("}", "\n)").strip()
             
             if "Doc #" in log:
-                # Entscheidung visualisieren
                 if '"score": "JA"' in log or "JA" in log:
-                    # HIER GEÄNDERT: Keine Backticks um {clean_log}
                     st.success(f"✅ **AKZEPTIERT:**\n{clean_log}") 
                 else:
-                    # HIER GEÄNDERT: Keine Backticks um {clean_log}
                     st.error(f"❌ **ABGELEHNT:**\n{clean_log}")
             else:
                 st.caption(log)
 
-# Trennlinie
 st.markdown("---")
 
-# Ergebnis-Anzeige (nur wenn vorhanden)
 if "result" in st.session_state:
     res: AgentState = st.session_state["result"]
     cat = res.get("category", "OTHER")
     
-    # --- FEHLERBEHEBUNG START: Variablen definieren ---
     draft_text = res.get("draft", "")
     context_text = res.get("context", "")
-    # --- FEHLERBEHEBUNG ENDE ---
 
     # === LOG-DATEI STRUKTURIEREN ===
-    
-    # 1. Metadaten Header
     log_header = f"""
 ==============================================================================
 MEDICAL AFFAIRS AI AGENT - AUDIT LOG
@@ -1065,15 +916,11 @@ Original Question:
 ------------------------------------------------------------------------------
 """
 
-    # 2. System Logs
     formatted_logs = "\n".join(res.get("logs", []))
     log_section = f"\n\n=== SYSTEM LOGS & DECISIONS ===\n{formatted_logs}"
 
-    # 3. Finaler Entwurf
     draft_section = f"\n\n=== FINAL GENERATED DRAFT ===\n{draft_text if draft_text else 'No draft generated.'}"
 
-    # 4. Kontext Audit
-    # Falls wir Source-Namen haben, listen wir diese auch auf
     sources_list = "\n- ".join(res.get("source_names", []))
     source_section = f"\nSources used:\n- {sources_list}\n" if res.get("source_names") else ""
 
@@ -1088,18 +935,14 @@ USED TEXT SNIPPETS (Fed to LLM):
 ==============================================================================
 """
 
-    # Alles zusammenfügen
     full_log_text = log_header + log_section + draft_section + audit_section
 
-    # Timestamp für Dateinamen
     tstamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = os.path.join(REPORT_FOLDER, f"log_{tstamp}.txt")
     
-    # Datei speichern
     with open(log_path, "w", encoding="utf-8") as f:
         f.write(full_log_text)
 
-    # Header mit Kategorie-Badge und Download-Button
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
         st.subheader("📊 Ergebnisse")
@@ -1112,49 +955,39 @@ USED TEXT SNIPPETS (Fed to LLM):
             use_container_width=True
         )
 
-    # Expander für detailliertes System-Log
     with st.expander("📜 Detailliertes System-Log", expanded=False):
         st.markdown("**Workflow-Verlauf mit Timestamps:**")
         for line in res.get("logs", []):
             st.text(line)
 
-    # === ERGEBNIS-DARSTELLUNG ===
-    if draft_text:  # Jetzt funktioniert diese Abfrage, da draft_text definiert ist
-        # Warnungen je nach Kategorie
+    if draft_text: 
         if cat == "ADVERSE_EVENT_ONLY":
             st.warning("⚠️ **REINE NEBENWIRKUNGSMELDUNG** – Standardprozess aktiviert")
         elif cat == "HYBRID":
             st.warning("⚠️ **HYBRID-ANFRAGE** – Nebenwirkung gemeldet + inhaltliche Frage beantwortet")
 
-        # Zwei-Spalten-Layout
         col1, col2 = st.columns([2, 1])
         
         with col2:
             st.markdown("### 📋 Metadaten")
             
-            # Fallback-Status oder Quellenangaben
             if res.get("fallback_mode"):
                 st.info("ℹ️ **Fallback-Modus**\n\nKeine DB-Dokumente gefunden")
             elif cat != "ADVERSE_EVENT_ONLY":
                 st.success("✅ **Quellen genutzt**")
                 st.markdown("**Verwendete Dokumente:**")
-                # Quelldateien auflisten
                 for idx, s in enumerate(res.get("source_names", []), 1):
                     st.caption(f"{idx}. 📄 {os.path.basename(s)}")
 
-                # Audit-Expander
                 with st.expander("🔍 Kontext-Audit", expanded=False):
                     st.info("**Verwendete Textauszüge:**")
-                    # Hier nutzen wir nun die korrekte Variable context_text
                     st.markdown(f"```text\n{context_text}\n```")
             
-            # Statistiken
             st.markdown("---")
             st.metric("🔄 Revisionen", res.get("revision_count", 0))
             st.metric("📄 Dokumente", len(res.get("source_names", [])))
         
         with col1:
-            # E-Mail-Vorschau
             st.markdown("### ✉️ Generierter Antwort-Entwurf")
             st.text_area(
                 "E-Mail Vorschau", 
@@ -1163,7 +996,6 @@ USED TEXT SNIPPETS (Fed to LLM):
                 label_visibility="collapsed"
             )
 
-            # Sende-Button
             st.markdown("<br>", unsafe_allow_html=True)
             btn_col1, btn_col2 = st.columns([1, 1])
             with btn_col1:
@@ -1175,10 +1007,8 @@ USED TEXT SNIPPETS (Fed to LLM):
                 if st.button("📋 In Zwischenablage kopieren", use_container_width=True):
                     st.toast("📋 Text in Zwischenablage kopiert!", icon="📋")
     else:
-        # Kein Draft generiert
         st.info(f"ℹ️ **Kategorie:** {cat} – Keine Antwort generiert.")
 
-# Footer
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #64748b; padding: 2rem 0;'>
@@ -1188,14 +1018,3 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
-
-
-
-
-
-
-
-
-
-
-
