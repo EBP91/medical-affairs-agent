@@ -69,7 +69,7 @@ TEMPLATES = {
 # Standardfrage für den Start
 DEFAULT_QUESTION = (
     "Sehr geehrter Herr Dr. Preuß,\n\n"
-    "Wir haben einem Säugling Espumisan gegeben. Kurz darauf bekam das Kind Atemnot.\n\n"
+    "Ich habe meinem Patienten Espumisam gegeben. Kurz darauf bekam dieser Atemnot.\n\n"
     "Bitte um Rückmeldung.\n\n"
     "Mit freundlichen Grüßen,\n"
     "Dr. Anna Müller"
@@ -1060,6 +1060,7 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
