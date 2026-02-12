@@ -817,7 +817,7 @@ with st.sidebar:
 
 # Hauptbereich: Titel und Beschreibung
 st.title("🧬 Medical Affairs AI Agent")
-st.markdown("# Medikament Espumisan")
+st.markdown("### Medikament Espumisan")
 
 st.markdown("""
 <div style='background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); 
@@ -1060,6 +1060,7 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
