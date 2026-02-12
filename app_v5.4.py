@@ -69,7 +69,7 @@ TEMPLATES = {
 # Standardfrage für den Start
 DEFAULT_QUESTION = (
     "Sehr geehrter Herr Dr. Preuß,\n\n"
-    "Wir haben einem Säugling Espumisan gegeben. Kurz darauf bekam das Kind Atemnot. Sind diese Nebenwirkungen bekannt?\n\n"
+    "Wir haben einem Säugling Espumisan gegeben. Kurz darauf bekam das Kind Atemnot.\n\n"
     "Bitte um Rückmeldung.\n\n"
     "Mit freundlichen Grüßen,\n"
     "Dr. Anna Müller"
@@ -817,7 +817,7 @@ with st.sidebar:
 
 # Hauptbereich: Titel und Beschreibung
 st.title("🧬 Medical Affairs AI Agent")
-st.markdown("Medikament Espumisan")
+st.markdown("# Medikament Espumisan")
 
 st.markdown("""
 <div style='background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); 
@@ -1060,6 +1060,7 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
