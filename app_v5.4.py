@@ -408,18 +408,31 @@ def triage_node(state: AgentState) -> dict:
     logs = add_log(state.get("logs"), "TRIAGE: Analysiere Intent & Sprache...") 
 
     prompt = f"""
-    Du bist ein Compliance-Offizier. Kategorisiere die Anfrage in genau EINE Kategorie:
-    Aufgabe 1: Bestimme die KATEGORIE der Anfrage basierend auf folgendem Schema:
-    1. "ADVERSE_EVENT_ONLY": Nutzer BERICHTET NUR über Vorfall/Symptome, stellt KEINE Frage.
-    2. "HYBRID": Nutzer BERICHTET über Vorfall UND stellt eine FRAGE dazu.
-    3. "MEDICAL_INFO": Nutzer stellt allgemeine Fragen ohne konkreten Patientenbezug/Vorfall.
-    4. "OTHER": Spam, reine Begrüßung.
-    Aufgabe 2: Bestimme die SPRACHE der Anfrage (DE oder EN).
+    Du bist ein erfahrener Drug Safety Officer. Deine Aufgabe ist die strikte Kategorisierung von eingehenden E-Mails.
+
+    SCHEMA:
+    1. "ADVERSE_EVENT_ONLY": 
+       - Der Nutzer berichtet eine Nebenwirkung, ein Symptom oder einen Vorfall.
+       - WICHTIG: Sätze wie "Bitte um Rückmeldung", "Bitte bestätigen", "Was soll ich tun?" oder "Haben Sie das erhalten?" zählen NICHT als medizinische Fachfrage. Das sind Standardfloskeln.
+       - Wähle dies, wenn keine explizite Wissensfrage (z.B. "Wie ist die Halbwertszeit?", "Gibt es Wechselwirkungen?") gestellt wird.
+
+    2. "HYBRID": 
+       - Der Nutzer berichtet einen Vorfall UND stellt eine konkrete pharmakologische/medizinische Wissensfrage (z.B. "Ist das bekannt?", "Wie wirkt das?", "Darf ich stattdessen X geben?").
+
+    3. "MEDICAL_INFO": 
+       - Reine Wissensfrage ohne Patientenbezug/Vorfall.
+
+    4. "OTHER": 
+       - Spam, Terminvereinbarungen, "Danke".
+
+    Aufgabe 2: Bestimme die Sprache (DE/EN).
 
     Antworte STRENG im Format: KATEGORIE | SPRACHE
-    Beispiel: MEDICAL_INFO | EN
     
-    Anfrage: {question}
+    E-Mail Text:
+    \"\"\"
+    {question}
+    \"\"\"
     """
     response = llm.invoke([HumanMessage(content=prompt)])
     content = response.content.strip()
@@ -428,10 +441,16 @@ def triage_node(state: AgentState) -> dict:
         parts = content.split("|")
         category = parts[0].strip()
         language = parts[1].strip().upper()
-        if language not in ["DE", "EN"]: language = "DE" # Fallback
+        if language not in ["DE", "EN"]: language = "DE"
     except:
         category = "OTHER"
         language = "DE"
+
+    # Sicherheitsnetz: Falls Kategorie unsicher, lieber AE Only als Hybrid (um Halluzinationen zu vermeiden)
+    if category == "HYBRID" and "?" not in question and "Wirkung" not in question and "Dosierung" not in question:
+         # Einfache Heuristik: Wenn kein Fragezeichen und keine Keywords, ist es wahrscheinlich kein Hybrid
+         logs = add_log(logs, "TRIAGE: Downgrade von HYBRID zu ADVERSE_EVENT_ONLY (Keine explizite Frage erkannt)")
+         category = "ADVERSE_EVENT_ONLY"
 
     has_ae = category in ("HYBRID", "ADVERSE_EVENT_ONLY")
 
@@ -441,7 +460,6 @@ def triage_node(state: AgentState) -> dict:
         "has_ae_component": has_ae,
         "logs": add_log(logs, f"TRIAGE: {category} (Sprache: {language})"),
     }
-
 
 def adverse_event_node(state: AgentState) -> dict:
     question = state["question"]
@@ -651,24 +669,38 @@ def critique_node(state: AgentState) -> dict:
     draft = state["draft"]
     question = state["question"]
     fallback = state.get("fallback_mode", False)
+    category = state.get("category", "")
     logs = state.get("logs", [])
 
-    criteria = (
-        "1. Wurde die Frage beantwortet? 2. Klingt der Text flüssig?"
-        if fallback
-        else "1. Sind alle Aussagen durch den Kontext belegt? 2. Keine Halluzinationen? 3. Werden Nebenwirkungen korrekt an PV verwiesen?"
-    )
+    # Kriterien je nach Szenario schärfen
+    if fallback:
+        criteria = "Wurde die Frage konservativ beantwortet? Keine medizinischen Ratschläge ohne Quelle?"
+    elif category == "ADVERSE_EVENT_ONLY":
+        # Hier darf eigentlich gar keine medizinische Info stehen!
+        criteria = "Enthält die Antwort NUR die Eingangsbestätigung? WICHTIG: Es dürfen KEINE medizinischen Erklärungen oder Datenbank-Infos enthalten sein, da keine Frage gestellt wurde."
+    else:
+        criteria = """
+        1. Beantwortet der Entwurf die gestellte Frage präzise?
+        2. Sind alle medizinischen Aussagen durch den Kontext belegt? (Keine Halluzinationen!)
+        3. Werden Nebenwirkungen korrekt an PV verwiesen?
+        4. Überflüssige Informationen entfernen.
+        """
 
     prompt = f"""
-    Du bist ein Senior Medical Reviewer. Prüfe den E-Mail Entwurf streng.
+    Du bist ein Senior Medical Reviewer (Audit). Prüfe den E-Mail Entwurf streng gegen die Kriterien.
     
-    Frage: {question}
-    Entwurf: {draft}
+    Kategorie: {category}
+    User-Frage: "{question}"
+    Generierter Entwurf: 
+    \"\"\"
+    {draft}
+    \"\"\"
+    
     Kriterien: {criteria}
     
-    Antworte exakt in diesem Format:
-    REASONING: [Hier deine detaillierte Begründung, warum gut oder schlecht]
-    VERDICT: [PASS oder FAIL: Fehlerbeschreibung]
+    Antworte exakt im Format:
+    REASONING: [Kurze Begründung]
+    VERDICT: [PASS oder FAIL: + Anweisung zur Verbesserung]
     """
     
     response = llm.invoke([HumanMessage(content=prompt)])
@@ -1060,6 +1092,7 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
