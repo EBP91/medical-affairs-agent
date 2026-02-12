@@ -489,7 +489,6 @@ def retrieve_node(state: AgentState) -> dict:
             "optimized_query": search_query
         }
 
-
 def grade_documents_node(state: AgentState) -> dict:
     question = state["question"]
     target_query = state.get("optimized_query", question)
@@ -498,40 +497,70 @@ def grade_documents_node(state: AgentState) -> dict:
     logs = state.get("logs", []) or []
     filtered_docs = []
 
-    for i, doc in enumerate(documents):
-        prompt = f"""
-        Du bist ein strenger Prüfer. 
-        Frage: {target_query}
-        Dokument-Ausschnitt: {doc.page_content}
+    # LATENZ-OPTIMIERUNG: Wir prüfen maximal 3 Dokumente, um Zeit zu sparen
+    # (Falls der Retriever mehr zurückgibt)
+    for i, doc in enumerate(documents[:3]):
         
-        Enthält das Dokument Informationen zur Beantwortung der Frage?
-        Antworte mit JSON Format: {{"reason": "kurze Begründung", "score": "JA" oder "NEIN"}}
+        # STRENGERER PROMPT GEGEN HALLUZINATIONEN
+        prompt = f"""
+        Du bist ein strenger medizinischer Prüfer für Pharmakovigilanz.
+        Deine Aufgabe: Prüfe, ob das Dokument EXAKT das Medikament oder Thema behandelt, nach dem gefragt wurde.
+
+        Frage des Nutzers: {target_query}
+        Dokument-Ausschnitt: 
+        \"\"\"
+        {doc.page_content}
+        \"\"\"
+
+        REGELN (Streng befolgen!):
+        1. IDENTITY CHECK: Wenn der Nutzer nach Medikament A (z.B. Aspirin) fragt, das Dokument aber zu Medikament B (z.B. Espumisan/Simeticon) gehört oder keinen Medikamentennamen nennt -> Ergebnis MUSS "NEIN" sein.
+        2. Halluziniere NICHT, dass der Text zum gesuchten Medikament gehört, wenn es nicht explizit dort steht.
+        3. Nur wenn das Dokument TATSÄCHLICH Informationen zur Frage liefert, ist der Score "JA".
+
+        Antworte NUR im JSON Format: {{"reason": "Kurze Erklärung, welches Medikament erkannt wurde und ob es matcht", "score": "JA" oder "NEIN"}}
         """
         
         try:
             response = llm.invoke([HumanMessage(content=prompt)])
             content = response.content.strip()
             
-            is_relevant = "JA" in content or '"score": "JA"' in content
+            # Robustes Parsing
+            is_relevant = '"score": "JA"' in content or ('"score": "JA"' not in content and "JA" in content and "NEIN" not in content)
             
-            doc_snippet = doc.page_content[:30].replace("\n", " ")
-            logs = add_log(logs, f"GRADING Doc #{i+1} ({doc_snippet}...): {content}")
+            # Logging kürzen für bessere Lesbarkeit
+            doc_snippet = doc.page_content[:40].replace("\n", " ") + "..."
+            
+            # Wir parsen die "reason" für das Log, falls möglich
+            import json
+            try:
+                # Versuch, JSON sauber zu parsen für schöneres Log
+                clean_json = content.replace("```json", "").replace("```", "").strip()
+                parsed = json.loads(clean_json)
+                reason_log = parsed.get("reason", "Keine Begründung")
+                score_log = parsed.get("score", "?")
+                log_msg = f"GRADING Doc #{i+1}: {score_log} | {reason_log}"
+            except:
+                # Fallback Log
+                log_msg = f"GRADING Doc #{i+1}: {content}"
+
+            logs = add_log(logs, log_msg)
 
             if is_relevant:
                 filtered_docs.append(doc)
+                
         except Exception as e:
-            logs = add_log(logs, f"GRADING Error: {e}")
+            logs = add_log(logs, f"GRADING Error bei Doc #{i+1}: {e}")
 
     if not filtered_docs:
         fallback = True
         context_text = ""
         source_names = []
-        logs = add_log(logs, "GRADING: ⚠️ Alle Dokumente abgelehnt -> Fallback.")
+        logs = add_log(logs, "GRADING: ⚠️ Alle Dokumente irrelevant/falsches Medikament -> Fallback aktiviert.")
     else:
         fallback = False
         context_text = "\n\n".join(d.page_content for d in filtered_docs)
         source_names = sorted({d.metadata.get("source", "Unbekannt") for d in filtered_docs})
-        logs = add_log(logs, f"GRADING: {len(filtered_docs)} Dokumente akzeptiert.")
+        logs = add_log(logs, f"GRADING: {len(filtered_docs)} Dokumente für Antwort akzeptiert.")
 
     return {
         "documents": filtered_docs,
@@ -1021,4 +1050,5 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
