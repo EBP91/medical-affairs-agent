@@ -78,7 +78,7 @@ DEFAULT_QUESTION = (
 SCENARIOS = {
     "--- Bitte wählen (oder selbst tippen) ---": "",
     
-    "Szenario A: Nebenwirkung (Espumisan)": DEFAULT_QUESTION,
+    "Szenario A: Adverse Event (Unbekannte Nebenwirkung)": DEFAULT_QUESTION,
     
     "Szenario B: Medizinische Info (Dosierung)": (
         "Hallo Medical Team,\n\n"
@@ -87,7 +87,7 @@ SCENARIOS = {
         "Danke und Gruß,\nThomas Meier, Apotheker"
     ),
     
-    "Szenario C: Medikament nicht in Datenbank (Fallback)": (
+    "Szenario C: Fallback (Medikament nicht in Datenbank)": (
         "Guten Tag,\n\n"
         "Wie dosiere ich Paracetamol?\n"
         "MfG, Dr. S. Klein"
@@ -1060,6 +1060,7 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
