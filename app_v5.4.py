@@ -318,7 +318,10 @@ embeddings = GoogleGenerativeAIEmbeddings(
     google_api_key=os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
 )
 vectorstore = Chroma(persist_directory=DB_FOLDER, embedding_function=embeddings)
-retriever = vectorstore.as_retriever(search_kwargs={"k": 3})  # Top-3 Dokumente
+retriever = vectorstore.as_retriever(
+    search_type="similarity_score_threshold",
+    search_kwargs={"score_threshold": 0.6, "k": 3}
+)
 
 
 # ==============================================================================
@@ -1050,5 +1053,6 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
