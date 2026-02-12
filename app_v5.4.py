@@ -82,7 +82,7 @@ SCENARIOS = {
     
     "Szenario B: Medizinische Info (Dosierung)": (
         "Hallo Medical Team,\n\n"
-        "ich bräuchte Informationen zur maximalen Tagesdosis von Espumisan für Erwachsene vor einer Gastroskopie.\n"
+        "ich bräuchte Informationen zur Dosierung von Espumisan für Erwachsene vor einer Gastroskopie.\n"
         "Gibt es da spezielle Vorgaben?\n\n"
         "Danke und Gruß,\nThomas Meier, Apotheker"
     ),
@@ -1092,6 +1092,7 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
