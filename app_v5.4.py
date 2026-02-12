@@ -87,14 +87,20 @@ SCENARIOS = {
         "Danke und Gruß,\nThomas Meier, Apotheker"
     ),
     
-    "Szenario C: Hybrid (NW + Frage)": (
+    "Szenario C: Medikament nicht in Datenbank (Fallback)": (
+        "Guten Tag,\n\n"
+        "Wie dosiere ich Paracetamol?\n"
+        "MfG, Dr. S. Klein"
+    ),
+    
+    "Szenario D: Hybrid (NW + Frage)": (
         "Guten Tag,\n\n"
         "mein Patient klagt über Hautausschlag nach der Einnahme. Ist das normal?\n"
         "Außerdem wüsste ich gerne, ob man das Medikament in der Schwangerschaft geben darf.\n\n"
         "MfG, Dr. S. Klein"
     ),
     
-    "Szenario D: Irrelevant / Spam": (
+    "Szenario E: Irrelevant / Spam": (
         "Hi,\n\n"
         "wollte nur mal fragen, wann eure Kantine heute aufmacht?\n\n"
         "LG Peter"
@@ -811,6 +817,7 @@ with st.sidebar:
 
 # Hauptbereich: Titel und Beschreibung
 st.title("🧬 Medical Affairs AI Agent")
+st.markdown("Medikament Espumisan")
 
 st.markdown("""
 <div style='background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); 
@@ -1053,6 +1060,7 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
