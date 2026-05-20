@@ -312,7 +312,7 @@ if not os.path.exists(DB_FOLDER):
 
 # LLM-Instanz mit Gemini-Modell initialisieren
 llm = ChatGoogleGenerativeAI(
-    model="gemma-4-26b-it", 
+    model="gemma-4-26b", 
     temperature=0,
     google_api_key=os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
 )
