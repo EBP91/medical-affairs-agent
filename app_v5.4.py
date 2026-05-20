@@ -319,9 +319,9 @@ api_key_env = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 api_key_secrets = st.secrets.get("GOOGLE_API_KEY") or st.secrets.get("GEMINI_API_KEY")
 final_api_key = api_key_env or api_key_secrets
 
-# 2. LLM mit der exakten Google API Model-ID initialisieren
+# Ändere das Modell auf die vollständige API-ID:
 llm = ChatGoogleGenerativeAI(
-    model="gemma-4-26b-it",  # Ohne "models/" Präfix probieren
+    model="models/gemma-4-26b-a4b-it",  # <- Das ist der exakte API-Name für Gemma 4 26B
     temperature=0,
     google_api_key=final_api_key
 )
