@@ -310,11 +310,26 @@ if not os.path.exists(DB_FOLDER):
     st.error("❌ Datenbank nicht gefunden! Bitte erst 'indexer.py' ausführen.")
     st.stop()
 
-# LLM-Instanz mit Gemini-Modell initialisieren
+# ==============================================================================
+# KORRIGIERTE INITIALISIERUNG
+# ==============================================================================
+
+# 1. API Key sicher abfangen (Wichtig für Streamlit Cloud Secrets)
+api_key_env = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+api_key_secrets = st.secrets.get("GOOGLE_API_KEY") or st.secrets.get("GEMINI_API_KEY")
+final_api_key = api_key_env or api_key_secrets
+
+# 2. LLM mit der exakten Google API Model-ID initialisieren
 llm = ChatGoogleGenerativeAI(
-    model="gemma-4-26b", 
+    model="models/gemma-4-26b-it",  # <- "models/" Präfix und "-it" (Instruction Tuned) Suffix sind API-Pflicht
     temperature=0,
-    google_api_key=os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+    google_api_key=final_api_key
+)
+
+# 3. Vektordatenbank und Retriever initialisieren
+embeddings = GoogleGenerativeAIEmbeddings(
+    model="models/gemini-embedding-001", 
+    google_api_key=final_api_key
 )
 
 
