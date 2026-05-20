@@ -312,7 +312,7 @@ if not os.path.exists(DB_FOLDER):
 
 # LLM-Instanz mit Gemini-Modell initialisieren
 llm = ChatGoogleGenerativeAI(
-    model="gemma-3-27b-it", 
+    model="gemma-4-26b-it", 
     temperature=0,
     google_api_key=os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
 )
@@ -787,7 +787,7 @@ with st.sidebar:
     st.header("⚙️ System-Status")
     
     st.success("✅ **Datenbank:** Aktiv")
-    st.info("🤖 **LLM:** gemma-3-27b-it")
+    st.info("🤖 **LLM:** gemma-4-26b-it")
     
     st.caption(f"📂 DB-Pfad: `{DB_FOLDER}`")
     
@@ -1086,7 +1086,7 @@ USED TEXT SNIPPETS (Fed to LLM):
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #64748b; padding: 2rem 0;'>
-    <p style='margin: 0;'>🧬 Medical Affairs AI Agent v5.4 | Powered by LangGraph & Gemma-3-27b-it</p>
+    <p style='margin: 0;'>🧬 Medical Affairs AI Agent v5.4 | Powered by LangGraph & Gemma-4-26b-it</p>
     <p style='margin: 0.5rem 0 0 0; font-size: 0.9rem;'>
         © 2025 | Dr. Eike Bent Preuß | Medical Affairs Solutions GmbH
     </p>
