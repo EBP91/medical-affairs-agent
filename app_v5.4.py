@@ -802,7 +802,7 @@ with st.sidebar:
     st.header("⚙️ System-Status")
     
     st.success("✅ **Datenbank:** Aktiv")
-    st.info("🤖 **LLM:** gemma-4-26b-it")
+    st.info("🤖 **LLM:** gemma-4-26b-a4b-it")
     
     st.caption(f"📂 DB-Pfad: `{DB_FOLDER}`")
     
