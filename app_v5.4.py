@@ -321,7 +321,7 @@ final_api_key = api_key_env or api_key_secrets
 
 # 2. LLM mit der exakten Google API Model-ID initialisieren
 llm = ChatGoogleGenerativeAI(
-    model="models/gemma-4-26b-it",  # <- "models/" Präfix und "-it" (Instruction Tuned) Suffix sind API-Pflicht
+    model="gemma-4-26b-it",  # Ohne "models/" Präfix probieren
     temperature=0,
     google_api_key=final_api_key
 )
