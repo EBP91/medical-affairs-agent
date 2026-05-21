@@ -327,7 +327,7 @@ embeddings = GoogleGenerativeAIEmbeddings(
 vectorstore = Chroma(persist_directory=DB_FOLDER, embedding_function=embeddings)
 retriever = vectorstore.as_retriever(
     search_type="similarity_score_threshold",
-    search_kwargs={"score_threshold": 0.6, "k": 3}
+    search_kwargs={"score_threshold": 0.4, "k": 3}
 )
 
 
@@ -557,17 +557,17 @@ def grade_documents_node(state: AgentState) -> dict:
             response = llm.invoke([HumanMessage(content=prompt)])
             content = extract_text(response)
             
-            is_relevant = '"score": "JA"' in content or ('"score": "JA"' not in content and "JA" in content and "NEIN" not in content)
-            
             import json
-            try:
-                clean_json = content.replace("```json", "").replace("```", "").strip()
-                parsed = json.loads(clean_json)
-                reason_log = parsed.get("reason", "Keine Begründung")
-                score_log = parsed.get("score", "?")
-                log_msg = f"GRADING Doc #{i+1}: {score_log} | {reason_log}"
-            except:
-                log_msg = f"GRADING Doc #{i+1}: {content}"
+            # JSON bereinigen und parsen
+            clean_json = content.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(clean_json)
+            
+            # Werte sicher extrahieren und standardisieren
+            score_log = str(parsed.get("score", "")).strip().upper()
+            reason_log = parsed.get("reason", "Keine Begründung")
+            
+            is_relevant = (score_log == "JA")
+            log_msg = f"GRADING Doc #{i+1}: {score_log} | {reason_log}"
 
             logs = add_log(logs, log_msg)
 
@@ -575,7 +575,7 @@ def grade_documents_node(state: AgentState) -> dict:
                 filtered_docs.append(doc)
                 
         except Exception as e:
-            logs = add_log(logs, f"GRADING Error bei Doc #{i+1}: {e}")
+            logs = add_log(logs, f"GRADING Error bei Doc #{i+1}: {e} | Raw Output: {content}")
 
     if not filtered_docs:
         fallback = True
