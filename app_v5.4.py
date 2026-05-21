@@ -1,14 +1,14 @@
 """
-Medical Affairs AI Agent v5.4
-=============================
+Medical Affairs AI Agent v5.5 (Optimized)
+=========================================
 
-Ein LangGraph-basierter Medical-Information-Agent zur automatisisierten 
+Ein LangGraph-basierter Medical-Information-Agent zur automatisierten 
 Klassifikation und Beantwortung von Anfragen im Pharmakontext.
 
 Features:
 ---------
-- Automatische Triage von Anfragen (Nebenwirkungsmeldung, medizinische Info, Sonstiges)
-- RAG-basierte Antwortgenerierung mit Dokumenten-Grading
+- Automatische Triage von Anfragen & Anrede-Extraktion in einem Schritt
+- RAG-basierte Antwortgenerierung mit integriertem Relevanz-Check
 - Iterative Qualitätskontrolle durch Critique-Loop
 - Fallback-Modus bei fehlenden Quelldokumenten
 - Vollständiges Audit-Logging mit Timestamps
@@ -21,12 +21,13 @@ Abhängigkeiten:
 - Streamlit für Web-Interface
 - Chroma für Vektordatenbank
 
-Autor: [Dein Name]
-Datum: 2025-12-19
+Autor: Dr. Eike Bent Preuß
+Datum: 2026-05-21
 """
 
 import os
 import datetime
+import json
 from typing import TypedDict, List
 
 import streamlit as st
@@ -63,12 +64,12 @@ TEMPLATES = {
 }
 
 # ==============================================================================
-# TEST SCENARIOS (Für Dropdown)
+# TEST SCENARIOS
 # ==============================================================================
 
 DEFAULT_QUESTION = (
     "Sehr geehrter Herr Dr. Preuß,\n\n"
-    "Ich habe meinem Patienten Espumisam gegeben. Kurz darauf bekam dieser Atemnot.\n\n"
+    "Ich habe meinem Patienten Espumisan gegeben. Kurz darauf bekam dieser Atemnot.\n\n"
     "Bitte um Rückmeldung.\n\n"
     "Mit freundlichen Grüßen,\n"
     "Dr. Anna Müller"
@@ -76,29 +77,24 @@ DEFAULT_QUESTION = (
 
 SCENARIOS = {
     "--- Bitte wählen (oder selbst tippen) ---": "",
-    
     "Szenario A: Adverse Event (Unbekannte Nebenwirkung)": DEFAULT_QUESTION,
-    
     "Szenario B: Medizinische Info (Dosierung)": (
         "Hallo Medical Team,\n\n"
         "ich bräuchte Informationen zur Dosierung von Espumisan für Erwachsene vor einer Gastroskopie.\n"
         "Gibt es da spezielle Vorgaben?\n\n"
         "Danke und Gruß,\nThomas Meier, Apotheker"
     ),
-    
     "Szenario C: Fallback (Medikament nicht in Datenbank)": (
         "Guten Tag,\n\n"
         "Wie dosiere ich Paracetamol?\n"
         "MfG, Dr. S. Klein"
     ),
-    
     "Szenario D: Hybrid (NW + Frage)": (
         "Guten Tag,\n\n"
         "mein Patient klagt über Hautausschlag nach der Einnahme. Ist das normal?\n"
         "Außerdem wüsste ich gerne, ob man das Medikament in der Schwangerschaft geben darf.\n\n"
         "MfG, Dr. S. Klein"
     ),
-    
     "Szenario E: Irrelevant / Spam": (
         "Hi,\n\n"
         "wollte nur mal fragen, wann eure Kantine heute aufmacht?\n\n"
@@ -111,170 +107,30 @@ SCENARIOS = {
 # ==============================================================================
 
 def apply_custom_css():
-    """
-    Wendet benutzerdefiniertes CSS für ein professionelles medizinisches Design an.
-    """
     st.markdown("""
         <style>
-        /* Hauptcontainer */
-        .main {
-            background: linear-gradient(135deg, #f5f7fa 0%, #e8f0f7 100%);
-        }
-        
-        /* Header Styling */
-        h1 {
-            color: #1e3a8a;
-            font-family: 'Helvetica Neue', sans-serif;
-            font-weight: 700;
-            padding-bottom: 0.5rem;
-            border-bottom: 3px solid #3b82f6;
-        }
-        
-        h2 {
-            color: #1e40af;
-            font-family: 'Helvetica Neue', sans-serif;
-            margin-top: 2rem;
-        }
-        
-        h3 {
-            color: #2563eb;
-            font-family: 'Helvetica Neue', sans-serif;
-        }
-        
-        /* Text Area Styling */
-        .stTextArea textarea {
-            border: 2px solid #cbd5e1;
-            border-radius: 8px;
-            padding: 1rem;
-            font-size: 1rem;
-            transition: border-color 0.3s ease;
-        }
-        
-        .stTextArea textarea:focus {
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-        }
-        
-        /* Button Styling */
-        .stButton > button {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            padding: 0.75rem 2rem;
-            font-weight: 600;
-            font-size: 1rem;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 6px rgba(59, 130, 246, 0.2);
-        }
-        
-        .stButton > button:hover {
-            background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(59, 130, 246, 0.3);
-        }
-        
-        /* Download Button */
-        .stDownloadButton > button {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            padding: 0.5rem 1.5rem;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 6px rgba(16, 185, 129, 0.2);
-        }
-        
-        .stDownloadButton > button:hover {
-            background: linear-gradient(135deg, #059669 0%, #047857 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(16, 185, 129, 0.3);
-        }
-        
-        /* Info/Warning/Success Boxes */
-        .stAlert {
-            border-radius: 8px;
-            border-left: 4px solid;
-            padding: 1rem;
-            margin: 1rem 0;
-        }
-        
-        /* Expander Styling */
-        .streamlit-expanderHeader {
-            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
-            border-radius: 8px;
-            padding: 0.75rem;
-            font-weight: 600;
-            color: #1e3a8a;
-            border: 1px solid #cbd5e1;
-        }
-        
-        .streamlit-expanderHeader:hover {
-            background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
-        }
-        
-        /* Sidebar Styling */
-        [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #1e3a8a 0%, #1e40af 100%);
-        }
-        
-        [data-testid="stSidebar"] h1,
-        [data-testid="stSidebar"] h2,
-        [data-testid="stSidebar"] h3,
-        [data-testid="stSidebar"] p,
-        [data-testid="stSidebar"] label {
-            color: white;
-        }
-        
-        /* Metric Cards */
-        [data-testid="stMetricValue"] {
-            font-size: 2rem;
-            color: #1e3a8a;
-            font-weight: 700;
-        }
-        
-        /* Caption Styling für Quellen */
-        .stCaption {
-            background: #f8fafc;
-            padding: 0.25rem 0.75rem;
-            border-radius: 6px;
-            border-left: 3px solid #3b82f6;
-            margin: 0.25rem 0;
-            font-family: 'Courier New', monospace;
-        }
-        
-        /* Spinner Styling */
-        .stSpinner > div {
-            border-top-color: #3b82f6 !important;
-        }
-        
-        /* Toast Notification */
-        .stToast {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: white;
-            border-radius: 8px;
-        }
-        
-        /* Code Block Styling */
-        .stMarkdown pre {
-            background: #1e293b;
-            color: #f8fafc; 
-            border-radius: 8px;
-            padding: 1rem;
-            border-left: 4px solid #3b82f6;
-        }
-        
-        .stMarkdown pre code {
-            color: #f8fafc;
-        }
-        
-        /* Log Text Styling */
-        .stText {
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-            color: #334155;
-        }
+        .main { background: linear-gradient(135deg, #f5f7fa 0%, #e8f0f7 100%); }
+        h1 { color: #1e3a8a; font-family: 'Helvetica Neue', sans-serif; font-weight: 700; padding-bottom: 0.5rem; border-bottom: 3px solid #3b82f6; }
+        h2 { color: #1e40af; font-family: 'Helvetica Neue', sans-serif; margin-top: 2rem; }
+        h3 { color: #2563eb; font-family: 'Helvetica Neue', sans-serif; }
+        .stTextArea textarea { border: 2px solid #cbd5e1; border-radius: 8px; padding: 1rem; font-size: 1rem; transition: border-color 0.3s ease; }
+        .stTextArea textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+        .stButton > button { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 8px; padding: 0.75rem 2rem; font-weight: 600; font-size: 1rem; transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.2); }
+        .stButton > button:hover { background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); transform: translateY(-2px); box-shadow: 0 6px 12px rgba(59, 130, 246, 0.3); }
+        .stDownloadButton > button { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 8px; padding: 0.5rem 1.5rem; font-weight: 600; transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(16, 185, 129, 0.2); }
+        .stDownloadButton > button:hover { background: linear-gradient(135deg, #059669 0%, #047857 100%); transform: translateY(-2px); box-shadow: 0 6px 12px rgba(16, 185, 129, 0.3); }
+        .stAlert { border-radius: 8px; border-left: 4px solid; padding: 1rem; margin: 1rem 0; }
+        .streamlit-expanderHeader { background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%); border-radius: 8px; padding: 0.75rem; font-weight: 600; color: #1e3a8a; border: 1px solid #cbd5e1; }
+        .streamlit-expanderHeader:hover { background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%); }
+        [data-testid="stSidebar"] { background: linear-gradient(180deg, #1e3a8a 0%, #1e40af 100%); }
+        [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] p, [data-testid="stSidebar"] label { color: white; }
+        [data-testid="stMetricValue"] { font-size: 2rem; color: #1e3a8a; font-weight: 700; }
+        .stCaption { background: #f8fafc; padding: 0.25rem 0.75rem; border-radius: 6px; border-left: 3px solid #3b82f6; margin: 0.25rem 0; font-family: 'Courier New', monospace; }
+        .stSpinner > div { border-top-color: #3b82f6 !important; }
+        .stToast { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border-radius: 8px; }
+        .stMarkdown pre { background: #1e293b; color: #f8fafc;  border-radius: 8px; padding: 1rem; border-left: 4px solid #3b82f6; }
+        .stMarkdown pre code { color: #f8fafc; }
+        .stText { font-family: 'Courier New', monospace; font-size: 0.9rem; color: #334155; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -283,17 +139,11 @@ def apply_custom_css():
 # 1. KONFIGURATION & SETUP
 # ==============================================================================
 
-PAGE_TITLE = "Demo: MedAffairs AI Agent v5.4"
-DB_FOLDER = "chroma_db"  # Pfad zur Chroma-Vektordatenbank
-REPORT_FOLDER = "reports"  # Ordner für Log-Dateien
+PAGE_TITLE = "Demo: MedAffairs AI Agent v5.5"
+DB_FOLDER = "chroma_db"  
+REPORT_FOLDER = "reports" 
 
-st.set_page_config(
-    page_title=PAGE_TITLE, 
-    layout="wide",
-    page_icon="🧬",
-    initial_sidebar_state="expanded"
-)
-
+st.set_page_config(page_title=PAGE_TITLE, layout="wide", page_icon="🧬", initial_sidebar_state="expanded")
 apply_custom_css()
 load_dotenv()
 
@@ -303,31 +153,31 @@ if not os.path.exists(DB_FOLDER):
     st.error("❌ Datenbank nicht gefunden! Bitte erst 'indexer.py' ausführen.")
     st.stop()
 
-# Wasserdichte API-Key-Erkennung für Local & Streamlit Cloud
+# .env bevorzugt verwenden
 api_key_env = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-api_key_secrets = st.secrets.get("GOOGLE_API_KEY") or st.secrets.get("GEMINI_API_KEY")
+api_key_secrets = st.secrets.get("GOOGLE_API_KEY") if "GOOGLE_API_KEY" in st.secrets else st.secrets.get("GEMINI_API_KEY") if "GEMINI_API_KEY" in st.secrets else None
 final_api_key = api_key_env or api_key_secrets
 
 if not final_api_key:
-    st.error("❌ KRITISCH: Kein API-Key gefunden! Bitte überprüfe deine Streamlit Cloud Secrets.")
+    st.error("❌ KRITISCH: Kein API-Key gefunden!")
     st.stop()
 
-# LLM-Instanz mit exakter Gemma 4 API-ID initialisieren
+# LLM-Instanz mit Gemini 3.1 Flash Lite für hohe Geschwindigkeit
 llm = ChatGoogleGenerativeAI(
-    model="models/gemma-4-26b-a4b-it", 
+    model="models/gemini-3.1-flash-lite", 
     temperature=0,
     google_api_key=final_api_key
 )
 
-# Vektordatenbank und Retriever initialisieren
+# Vektordatenbank und Retriever initialisieren (Similarity Search)
 embeddings = GoogleGenerativeAIEmbeddings(
     model="models/gemini-embedding-001", 
     google_api_key=final_api_key
 )
 vectorstore = Chroma(persist_directory=DB_FOLDER, embedding_function=embeddings)
 retriever = vectorstore.as_retriever(
-    search_type="similarity_score_threshold",
-    search_kwargs={"score_threshold": 0.4, "k": 3}
+    search_type="similarity",
+    search_kwargs={"k": 3}
 )
 
 
@@ -338,6 +188,8 @@ retriever = vectorstore.as_retriever(
 class AgentState(TypedDict):
     question: str
     category: str
+    language: str
+    salutation: str
     context: str
     documents: List[Document]
     source_names: List[str]
@@ -347,8 +199,6 @@ class AgentState(TypedDict):
     logs: List[str]
     fallback_mode: bool
     has_ae_component: bool
-    optimized_query: str
-    language: str
 
 
 def add_log(current_logs: List[str] | None, message: str) -> List[str]:
@@ -357,20 +207,13 @@ def add_log(current_logs: List[str] | None, message: str) -> List[str]:
 
 
 def extract_text(response) -> str:
-    """
-    Extrahiert den Antworttext sicher, egal ob response.content 
-    ein String oder eine Liste von Content-Blöcken ist (wichtig für Gemma 4).
-    """
     content = response.content
     if isinstance(content, list):
         text_parts = []
         for part in content:
-            if isinstance(part, str):
-                text_parts.append(part)
-            elif isinstance(part, dict) and "text" in part:
-                text_parts.append(part["text"])
-            elif hasattr(part, "text"):
-                text_parts.append(part.text)
+            if isinstance(part, str): text_parts.append(part)
+            elif isinstance(part, dict) and "text" in part: text_parts.append(part["text"])
+            elif hasattr(part, "text"): text_parts.append(part.text)
         return "".join(text_parts).strip()
     return content.strip()
 
@@ -379,66 +222,23 @@ def extract_text(response) -> str:
 # 3. NODE DEFINITIONS (Graph-Knoten)
 # ==============================================================================
 
-def determine_salutation(email_text: str, language: str = "DE") -> str:
-    lang_instruction = (
-        "Erstelle eine deutsche Anrede (z.B. 'Sehr geehrte Frau Müller,')." 
-        if language == "DE" 
-        else "Create an English salutation (e.g. 'Dear Ms. Miller,')."
-    )
-
-    prompt = f"""
-    Du bist ein Assistent, der eine Antwort auf eine eingehende E-Mail verfasst.
-    Deine Aufgabe: Erstelle die Anrede für die ANTWORT-Mail an den Verfasser.
-
-    Regeln zur Namensfindung:
-    1. Suche den Namen des ABSENDERS. Dieser steht fast immer am ENDE der E-Mail (nach "Viele Grüße", "Mit freundlichen Grüßen", "Signatur").
-    2. WICHTIG: Ignoriere Namen, die am ANFANG der E-Mail stehen (z.B. "Hallo Dr. Preuß", "Guten Tag Team"). Das sind die Empfänger, NICHT die Absender.
-    3. Beachte das Geschlecht (Dr., Herr, Frau) für die korrekte Anrede (Sehr geehrter Herr..., Sehr geehrte Frau...).
-    5. Achte auf akademische Titel (Dr., Prof.) beim Absender.
-
-    Fallback:
-    - Wenn KEIN Name in der Signatur/am Ende erkennbar ist, antworte NUR mit: "Sehr geehrte Damen und Herren,"
-
-    Sprach-Anweisung: {lang_instruction}
-
-    E-Mail Text:
-    \"\"\"
-    {email_text}
-    \"\"\"
-
-    Antworte NUR mit der Anrede-Zeile ohne weitere Zeichen.
-    """
-    try:
-        response = llm.invoke([HumanMessage(content=prompt)])
-        return extract_text(response)
-    except:
-        return TEMPLATES[language]["salutation_fallback"]
-
 def triage_node(state: AgentState) -> dict:
     question = state["question"]
-    logs = add_log(state.get("logs"), "TRIAGE: Analysiere Intent & Sprache...") 
+    logs = add_log(state.get("logs"), "TRIAGE: Analysiere Intent, Sprache & Anrede...") 
 
     prompt = f"""
-    Du bist ein erfahrener Drug Safety Officer. Deine Aufgabe ist die strikte Kategorisierung von eingehenden E-Mails.
+    Du bist ein erfahrener Drug Safety Officer.
+    Aufgabe 1: Kategorisiere die E-Mail (ADVERSE_EVENT_ONLY, HYBRID, MEDICAL_INFO, OTHER).
+    Aufgabe 2: Bestimme die Sprache (DE oder EN).
+    Aufgabe 3: Extrahiere den Namen des Absenders am ENDE der E-Mail und bilde die passende Anrede (z.B. "Sehr geehrte Frau Dr. Müller,"). Fallback: "Sehr geehrte Damen und Herren,"
 
-    SCHEMA:
-    1. "ADVERSE_EVENT_ONLY": 
-       - Der Nutzer berichtet eine Nebenwirkung, ein Symptom oder einen Vorfall.
-       - WICHTIG: Sätze wie "Bitte um Rückmeldung", "Bitte bestätigen", "Was soll ich tun?" oder "Haben Sie das erhalten?" zählen NICHT als medizinische Fachfrage. Das sind Standardfloskeln.
-       - Wähle dies, wenn keine explizite Wissensfrage (z.B. "Wie ist die Halbwertszeit?", "Gibt es Wechselwirkungen?") gestellt wird.
+    SCHEMA für Kategorie:
+    1. "ADVERSE_EVENT_ONLY": Nebenwirkung, Symptom oder Vorfall. (Floskeln wie "Bitte um Rückmeldung" sind keine medizinische Fachfrage).
+    2. "HYBRID": Vorfall UND konkrete med. Fachfrage (z.B. nach Dosierung, HWZ).
+    3. "MEDICAL_INFO": Reine Wissensfrage ohne Patientenbezug/Vorfall.
+    4. "OTHER": Spam, Terminvereinbarungen, Dankeschön.
 
-    2. "HYBRID": 
-       - Der Nutzer berichtet einen Vorfall UND stellt eine konkrete pharmakologische/medizinische Wissensfrage (z.B. "Ist das bekannt?", "Wie wirkt das?", "Darf ich stattdessen X geben?").
-
-    3. "MEDICAL_INFO": 
-       - Reine Wissensfrage ohne Patientenbezug/Vorfall.
-
-    4. "OTHER": 
-       - Spam, Terminvereinbarungen, "Danke".
-
-    Aufgabe 2: Bestimme die Sprache (DE/EN).
-
-    Antworte STRENG im Format: KATEGORIE | SPRACHE
+    Antworte STRENG im Format: KATEGORIE | SPRACHE | ANREDE
     
     E-Mail Text:
     \"\"\"
@@ -449,13 +249,13 @@ def triage_node(state: AgentState) -> dict:
     content = extract_text(response)
     
     try:
-        parts = content.split("|")
-        category = parts[0].strip()
-        language = parts[1].strip().upper()
+        parts = [p.strip() for p in content.split("|")]
+        category = parts[0]
+        language = parts[1].upper() if len(parts) > 1 else "DE"
         if language not in ["DE", "EN"]: language = "DE"
+        salutation = parts[2] if len(parts) > 2 else TEMPLATES[language]["salutation_fallback"]
     except:
-        category = "OTHER"
-        language = "DE"
+        category, language, salutation = "OTHER", "DE", TEMPLATES["DE"]["salutation_fallback"]
 
     if category == "HYBRID" and "?" not in question and "Wirkung" not in question and "Dosierung" not in question:
          logs = add_log(logs, "TRIAGE: Downgrade von HYBRID zu ADVERSE_EVENT_ONLY (Keine explizite Frage erkannt)")
@@ -466,18 +266,18 @@ def triage_node(state: AgentState) -> dict:
     return {
         "category": category,
         "language": language, 
+        "salutation": salutation,
         "has_ae_component": has_ae,
-        "logs": add_log(logs, f"TRIAGE: {category} (Sprache: {language})"),
+        "logs": add_log(logs, f"TRIAGE: {category} | {language} | {salutation}"),
     }
 
+
 def adverse_event_node(state: AgentState) -> dict:
-    question = state["question"]
     lang = state.get("language", "DE") 
+    salutation = state.get("salutation", TEMPLATES[lang]["salutation_fallback"])
     logs = add_log(state.get("logs"), "ADVERSE EVENT: Generiere Bestätigung...")
 
     txt = TEMPLATES[lang]
-    salutation = determine_salutation(question, lang)
-
     response_text = (
         f"{salutation}\n\n"
         f"{txt['header']}\n\n"
@@ -491,110 +291,31 @@ def adverse_event_node(state: AgentState) -> dict:
         "logs": logs,
     }
 
+
 def retrieve_node(state: AgentState) -> dict:
     query = state["question"]
     logs = state.get("logs", []) or []
-    search_query = query 
-
-    if len(query) > 30: 
-        logs = add_log(logs, "RETRIEVAL: Starte Query-Optimierung...")
-        system_prompt = (
-            "Extrahiere die medizinischen Kernbegriffe für eine Datenbanksuche. "
-            "Entferne Anrede, Gruß und Füllwörter. "
-            "Behalte Medikamentennamen und Symptome exakt bei."
-        )
-        try:
-            response = llm.invoke([
-                HumanMessage(content=f"{system_prompt}\n\nText: {query}")
-            ])
-            clean_query = extract_text(response)
-            search_query = clean_query 
-            logs = add_log(logs, f"RETRIEVAL: Optimiert zu '{search_query}'")
-        except Exception as e:
-            logs = add_log(logs, f"Optimierung fehlgeschlagen: {str(e)}")
-
+    
+    logs = add_log(logs, "RETRIEVAL: Suche in Vektordatenbank...")
+    
     try:
-        docs = retriever.invoke(search_query) 
-        logs = add_log(logs, f"RETRIEVAL: {len(docs)} Dokumente gefunden.")
-        return {"documents": docs, "logs": logs, "optimized_query": search_query}
+        docs = retriever.invoke(query) 
+        if not docs:
+            return {"documents": [], "context": "", "source_names": [], "fallback_mode": True, "logs": add_log(logs, "RETRIEVAL: Keine Dokumente gefunden -> Fallback")}
+            
+        context_text = "\n\n".join(d.page_content for d in docs)
+        source_names = sorted(list(set(d.metadata.get("source", "Unbekannt") for d in docs)))
+        
+        return {
+            "documents": docs, 
+            "context": context_text,
+            "source_names": source_names,
+            "fallback_mode": False,
+            "logs": add_log(logs, f"RETRIEVAL: {len(docs)} Dokumente geladen.")
+        }
     except Exception as e:
         st.error(f"🚨 GOOGLE API FEHLER BEI EMBEDDINGS/RETRIEVAL: {str(e)}")
-        return {
-            "documents": [], 
-            "logs": add_log(logs, f"KRITISCHER FEHLER: {str(e)}"), 
-            "fallback_mode": True,
-            "optimized_query": search_query
-        }
-
-def grade_documents_node(state: AgentState) -> dict:
-    question = state["question"]
-    target_query = state.get("optimized_query", question)
-    
-    documents = state.get("documents", [])
-    logs = state.get("logs", []) or []
-    filtered_docs = []
-
-    for i, doc in enumerate(documents[:3]):
-        prompt = f"""
-        Du bist ein strenger medizinischer Prüfer für Pharmakovigilanz.
-        Deine Aufgabe: Prüfe, ob das Dokument EXAKT das Medikament oder Thema behandelt, nach dem gefragt wurde.
-
-        Frage des Nutzers: {target_query}
-        Dokument-Ausschnitt: 
-        \"\"\"
-        {doc.page_content}
-        \"\"\"
-
-        REGELN (Streng befolgen!):
-        1. IDENTITY CHECK: Wenn der Nutzer nach Medikament A (z.B. Aspirin) fragt, das Dokument aber zu Medikament B (z.B. Espumisan/Simeticon) gehört oder keinen Medikamentennamen nennt -> Ergebnis MUSS "NEIN" sein.
-        2. Halluziniere NICHT, dass der Text zum gesuchten Medikament gehört, wenn es nicht explizit dort steht.
-        3. Nur wenn das Dokument TATSÄCHLICH Informationen zur Frage liefert, ist der Score "JA".
-
-        Antworte NUR im JSON Format: {{"reason": "Kurze Erklärung, welches Medikament erkannt wurde und ob es matcht", "score": "JA" oder "NEIN"}}
-        """
-        
-        try:
-            response = llm.invoke([HumanMessage(content=prompt)])
-            content = extract_text(response)
-            
-            import json
-            # JSON bereinigen und parsen
-            clean_json = content.replace("```json", "").replace("```", "").strip()
-            parsed = json.loads(clean_json)
-            
-            # Werte sicher extrahieren und standardisieren
-            score_log = str(parsed.get("score", "")).strip().upper()
-            reason_log = parsed.get("reason", "Keine Begründung")
-            
-            is_relevant = (score_log == "JA")
-            log_msg = f"GRADING Doc #{i+1}: {score_log} | {reason_log}"
-
-            logs = add_log(logs, log_msg)
-
-            if is_relevant:
-                filtered_docs.append(doc)
-                
-        except Exception as e:
-            logs = add_log(logs, f"GRADING Error bei Doc #{i+1}: {e} | Raw Output: {content}")
-
-    if not filtered_docs:
-        fallback = True
-        context_text = ""
-        source_names = []
-        logs = add_log(logs, "GRADING: ⚠️ Alle Dokumente irrelevant/falsches Medikament -> Fallback aktiviert.")
-    else:
-        fallback = False
-        context_text = "\n\n".join(d.page_content for d in filtered_docs)
-        source_names = sorted({d.metadata.get("source", "Unbekannt") for d in filtered_docs})
-        logs = add_log(logs, f"GRADING: {len(filtered_docs)} Dokumente für Antwort akzeptiert.")
-
-    return {
-        "documents": filtered_docs,
-        "context": context_text,
-        "source_names": source_names,
-        "fallback_mode": fallback,
-        "logs": logs,
-    }
+        return {"documents": [], "context": "", "source_names": [], "fallback_mode": True, "logs": add_log(logs, f"KRITISCHER FEHLER: {str(e)} -> Fallback")}
 
 
 def build_instruction(critique: str | None) -> str:
@@ -616,24 +337,26 @@ def draft_node(state: AgentState) -> dict:
     fallback = state.get("fallback_mode", False)
     has_ae = state.get("has_ae_component", False)
     lang = state.get("language", "DE") 
+    salutation = state.get("salutation", TEMPLATES[lang]["salutation_fallback"])
     
     logs = add_log(state.get("logs"), f"DRAFT: Erstelle Antwort ({lang})...")
     
     txt = TEMPLATES[lang]
     instruction = build_instruction(critique)
-    lang_prompt = f"Antworte in der Sprache: {lang}. "
-
+    
     if fallback:
         prompt = f"""
-        {instruction} {lang_prompt}
+        {instruction} Antworte in der Sprache: {lang}.
         Du bist Medical Information Manager.
-        ACHTUNG: Keine internen Dokumente gefunden. Antworte basierend auf Allgemeinwissen (konservativ).
+        ACHTUNG: Keine internen Dokumente gefunden. Beantworte die Frage konservativ basierend auf Allgemeinwissen. Gib keine spezifischen Dosierungen an, wenn du dir unsicher bist.
         Frage: {question}
         """
     else:
         prompt = f"""
-        {instruction} {lang_prompt}
-        Nutze AUSSCHLIESSLICH den Kontext.
+        {instruction} Antworte in der Sprache: {lang}.
+        Beantworte die medizinische Frage AUSSCHLIESSLICH basierend auf folgendem Kontext.
+        WICHTIG: Wenn der Kontext nicht zur Frage oder zum genannten Medikament passt, ignoriere ihn und antworte exakt mit: "Leider liegen mir zu dieser spezifischen Frage keine internen Daten vor."
+        
         KONTEXT: {context}
         Frage: {question}
         """
@@ -641,18 +364,12 @@ def draft_node(state: AgentState) -> dict:
     response = llm.invoke([HumanMessage(content=prompt)])
     body_text = extract_text(response)
 
-    salutation = determine_salutation(question, lang)
+    # Konstruktion der E-Mail
     header = f"{salutation}\n\n{txt['header']}\n\n"
-
-    ae_block = ""
-    if has_ae:
-        ae_block = f"{txt['ae_intro']}\n\n{txt['ae_transition']}\n"
-
-    fallback_block = ""
-    if fallback:
-        fallback_block = f"{txt['fallback']}\n\n"
-
+    ae_block = f"{txt['ae_intro']}\n\n{txt['ae_transition']}\n" if has_ae else ""
+    fallback_block = f"{txt['fallback']}\n\n" if fallback or "keine internen Daten vor" in body_text else ""
     footer = f"\n\n{txt['footer']}"
+    
     final_response = header + ae_block + fallback_block + body_text + footer
 
     return {
@@ -732,7 +449,6 @@ workflow = StateGraph(AgentState)
 workflow.add_node("triage", triage_node)
 workflow.add_node("adverse_event", adverse_event_node)
 workflow.add_node("retrieve", retrieve_node)
-workflow.add_node("grade_documents", grade_documents_node)
 workflow.add_node("draft", draft_node)
 workflow.add_node("critique", critique_node)
 
@@ -755,8 +471,7 @@ workflow.add_conditional_edges(
 )
 
 workflow.add_edge("adverse_event", END) 
-workflow.add_edge("retrieve", "grade_documents") 
-workflow.add_edge("grade_documents", "draft") 
+workflow.add_edge("retrieve", "draft") 
 workflow.add_edge("draft", "critique") 
 
 def check_critique(state: AgentState) -> str:
@@ -780,7 +495,7 @@ app = workflow.compile()
 with st.sidebar:
     st.header("⚙️ System-Status")
     st.success("✅ **Datenbank:** Aktiv")
-    st.info("🤖 **LLM:** gemma-4-26b-it")
+    st.info("🤖 **LLM:** gemini-3.1-flash-lite")
     st.caption(f"📂 DB-Pfad: `{DB_FOLDER}`")
     
     st.markdown("---")
@@ -797,7 +512,6 @@ with st.sidebar:
 
         TRIAGE [shape=diamond, label="Triage\n(Intent)", fillcolor="#bfdbfe", color="#1e3a8a"];
         CRITIQUE [shape=diamond, label="Critique\n(Qualität)", fillcolor="#fef08a", color="#854d0e"];
-        GRADE [shape=diamond, label="Grading\n(Relevanz)", fillcolor="#dcfce7", color="#166534"];
 
         AE_NODE [label="🚑 Adverse Event\n(Meldung an PV)", fillcolor="#fee2e2", color="#991b1b"];
         RETRIEVE [label="🔍 Retrieval\n(DB Suche)", fillcolor="#f1f5f9", color="#475569"];
@@ -811,9 +525,7 @@ with st.sidebar:
 
         AE_NODE -> END;
 
-        RETRIEVE -> GRADE;
-        GRADE -> DRAFT [label="Docs OK"];
-        GRADE -> DRAFT [label="Fallback", style="dashed", fontcolor="#d97706"];
+        RETRIEVE -> DRAFT [label="Docs OK / Fallback"];
 
         DRAFT -> CRITIQUE;
         CRITIQUE -> END [label="✅ PASS", color="#22c55e", fontcolor="#15803d"];
@@ -896,6 +608,8 @@ if submit_button:
         "fallback_mode": False,
         "has_ae_component": False,
         "category": "",
+        "language": "DE",
+        "salutation": "",
         "context": "",
         "documents": [],
         "source_names": [],
@@ -913,27 +627,15 @@ if "result" in st.session_state:
     st.markdown("---")
     st.subheader("🕵️‍♂️ Debugging Dashboard")
     
-    d_col1, d_col2 = st.columns(2)
-    with d_col1:
-        st.markdown("**Original Anfrage:**")
-        st.info(res.get("question", ""))
-    with d_col2:
-        st.markdown("**Optimierte DB-Query:**")
-        opt_q = res.get("optimized_query", "N/A")
-        if not opt_q or len(opt_q) < 3:
-            st.error(f"⚠️ Warnung: '{opt_q}'")
-        else:
-            st.success(f"'{opt_q}'")
-
-    with st.expander("🔍 Detaillierte Filter-Protokolle (Grading)", expanded=True):
-        grading_logs = [l for l in res.get("logs", []) if "GRADING" in l]
-        for log in grading_logs:
-            clean_log = log.replace("```json", "").replace("```", "").replace("{", "(\n  ").replace("}", "\n)").strip()
-            if "Doc #" in log:
-                if '"score": "JA"' in log or "JA" in log:
-                    st.success(f"✅ **AKZEPTIERT:**\n{clean_log}") 
-                else:
-                    st.error(f"❌ **ABGELEHNT:**\n{clean_log}")
+    st.markdown("**Original Anfrage:**")
+    st.info(res.get("question", ""))
+    
+    with st.expander("🔍 System-Verlauf & Entscheidungen", expanded=True):
+        for log in res.get("logs", []):
+            if "✅" in log:
+                st.success(log)
+            elif "❌" in log or "⚠️" in log or "FEHLER" in log:
+                st.error(log)
             else:
                 st.caption(log)
 
@@ -996,11 +698,6 @@ USED TEXT SNIPPETS (Fed to LLM):
             use_container_width=True
         )
 
-    with st.expander("📜 Detailliertes System-Log", expanded=False):
-        st.markdown("**Workflow-Verlauf mit Timestamps:**")
-        for line in res.get("logs", []):
-            st.text(line)
-
     if draft_text: 
         if cat == "ADVERSE_EVENT_ONLY":
             st.warning("⚠️ **REINE NEBENWIRKUNGSMELDUNG** – Standardprozess aktiviert")
@@ -1051,7 +748,7 @@ USED TEXT SNIPPETS (Fed to LLM):
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #64748b; padding: 2rem 0;'>
-    <p style='margin: 0;'>🧬 Medical Affairs AI Agent v5.4 | Powered by LangGraph & Gemma-4-26b-it</p>
+    <p style='margin: 0;'>🧬 Medical Affairs AI Agent v5.5 | Powered by LangGraph & Gemini-3.1-Flash-Lite</p>
     <p style='margin: 0.5rem 0 0 0; font-size: 0.9rem;'>
         © 2026 | Dr. Eike Bent Preuß | Medical Affairs Solutions GmbH
     </p>
