@@ -338,6 +338,7 @@ def draft_node(state: AgentState) -> dict:
     txt = TEMPLATES[lang]
     instruction = build_instruction(critique)
     
+    # Pfad A: Bereits im Fallback-Modus (z.B. leere Datenbank beim Retrieval)
     if fallback:
         prompt = f"""
         {instruction} Antworte in der Sprache: {lang}.
@@ -345,6 +346,10 @@ def draft_node(state: AgentState) -> dict:
         ACHTUNG: Keine internen Dokumente gefunden. Beantworte die Frage konservativ basierend auf Allgemeinwissen. Gib keine spezifischen Dosierungen an, wenn du dir unsicher bist.
         Frage: {question}
         """
+        response = llm.invoke([HumanMessage(content=prompt)])
+        body_text = extract_text(response)
+    
+    # Pfad B: Versuche erst die RAG-Dokumente zu nutzen
     else:
         prompt = f"""
         {instruction} Antworte in der Sprache: {lang}.
@@ -354,17 +359,24 @@ def draft_node(state: AgentState) -> dict:
         KONTEXT: {context}
         Frage: {question}
         """
+        response = llm.invoke([HumanMessage(content=prompt)])
+        body_text = extract_text(response)
 
-    response = llm.invoke([HumanMessage(content=prompt)])
-    body_text = extract_text(response)
+        # DYNAMISCHER FALLBACK: Wenn der Kontext unpassend war, generiere jetzt die Allgemeinwissen-Antwort
+        if "[NO_CONTEXT]" in body_text:
+            fallback = True
+            logs = add_log(logs, "DRAFT: Token [NO_CONTEXT] erkannt -> Generiere Antwort basierend auf Allgemeinwissen.")
+            
+            fallback_prompt = f"""
+            {instruction} Antworte in der Sprache: {lang}.
+            Du bist Medical Information Manager.
+            ACHTUNG: Der interne Datenbank-Kontext war irrelevant. Beantworte die Frage konservativ basierend auf Allgemeinwissen. Gib keine spezifischen Dosierungen an, wenn du dir unsicher bist.
+            Frage: {question}
+            """
+            fallback_response = llm.invoke([HumanMessage(content=fallback_prompt)])
+            body_text = extract_text(fallback_response)
 
-    # DYNAMISCHER FALLBACK via Token-Erkennung
-    if "[NO_CONTEXT]" in body_text:
-        fallback = True
-        body_text = "Leider liegen mir zu dieser spezifischen Frage keine internen Daten vor."
-        logs = add_log(logs, "DRAFT: Token [NO_CONTEXT] erkannt -> Dynamischer Fallback ausgelöst.")
-
-    # Konstruktion der E-Mail
+    # Konstruktion der E-Mail (fügt den gelben Warnhinweis bei Fallback hinzu)
     header = f"{salutation}\n\n{txt['header']}\n\n"
     ae_block = f"{txt['ae_intro']}\n\n{txt['ae_transition']}\n" if has_ae else ""
     fallback_block = f"{txt['fallback']}\n\n" if fallback else ""
@@ -376,7 +388,7 @@ def draft_node(state: AgentState) -> dict:
         "draft": final_response,
         "revision_count": state.get("revision_count", 0) + 1,
         "logs": logs,
-        "fallback_mode": fallback  # Überschreibt den State für den nachfolgenden Critique-Node
+        "fallback_mode": fallback
     }
 
 def critique_node(state: AgentState) -> dict:
