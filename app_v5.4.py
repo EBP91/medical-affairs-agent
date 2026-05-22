@@ -1,6 +1,6 @@
 """
-Medical Affairs AI Agent v5.5 (Optimized)
-=========================================
+Medical Affairs AI Agent v5.6 (Optimized & Cached)
+==================================================
 
 Ein LangGraph-basierter Medical-Information-Agent zur automatisierten 
 Klassifikation und Beantwortung von Anfragen im Pharmakontext.
@@ -8,11 +8,11 @@ Klassifikation und Beantwortung von Anfragen im Pharmakontext.
 Features:
 ---------
 - Automatische Triage von Anfragen & Anrede-Extraktion in einem Schritt
-- RAG-basierte Antwortgenerierung mit integriertem Relevanz-Check
+- RAG-basierte Antwortgenerierung mit Token-basiertem Relevanz-Check
 - Iterative Qualitätskontrolle durch Critique-Loop
 - Fallback-Modus bei fehlenden Quelldokumenten
 - Vollständiges Audit-Logging mit Timestamps
-- Test-Szenarien Auswahl für Demo-Zwecke
+- Caching für LLM & Vektordatenbank zur Latenz-Minimierung
 
 Abhängigkeiten:
 ---------------
@@ -22,7 +22,7 @@ Abhängigkeiten:
 - Chroma für Vektordatenbank
 
 Autor: Dr. Eike Bent Preuß
-Datum: 2026-05-21
+Datum: 2026-05-22
 """
 
 import os
@@ -38,7 +38,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from langchain_community.vectorstores import Chroma
 from langchain_core.messages import HumanMessage
 from langchain_core.documents import Document
-
 
 # ==============================================================================
 # MULTI-LANGUAGE TEMPLATES
@@ -136,10 +135,10 @@ def apply_custom_css():
 
 
 # ==============================================================================
-# 1. KONFIGURATION & SETUP
+# 1. KONFIGURATION & SETUP (mit Caching)
 # ==============================================================================
 
-PAGE_TITLE = "Demo: MedAffairs AI Agent v5.5"
+PAGE_TITLE = "Demo: MedAffairs AI Agent v5.6"
 DB_FOLDER = "chroma_db"  
 REPORT_FOLDER = "reports" 
 
@@ -153,7 +152,6 @@ if not os.path.exists(DB_FOLDER):
     st.error("❌ Datenbank nicht gefunden! Bitte erst 'indexer.py' ausführen.")
     st.stop()
 
-# .env bevorzugt verwenden
 api_key_env = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 api_key_secrets = st.secrets.get("GOOGLE_API_KEY") if "GOOGLE_API_KEY" in st.secrets else st.secrets.get("GEMINI_API_KEY") if "GEMINI_API_KEY" in st.secrets else None
 final_api_key = api_key_env or api_key_secrets
@@ -162,23 +160,25 @@ if not final_api_key:
     st.error("❌ KRITISCH: Kein API-Key gefunden!")
     st.stop()
 
-# LLM-Instanz mit Gemini 3.1 Flash Lite für hohe Geschwindigkeit
-llm = ChatGoogleGenerativeAI(
-    model="models/gemini-3.1-flash-lite", 
-    temperature=0,
-    google_api_key=final_api_key
-)
+@st.cache_resource
+def init_llm(api_key):
+    return ChatGoogleGenerativeAI(
+        model="models/gemini-3.1-flash-lite", 
+        temperature=0,
+        google_api_key=api_key
+    )
 
-# Vektordatenbank und Retriever initialisieren (Similarity Search)
-embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/gemini-embedding-001", 
-    google_api_key=final_api_key
-)
-vectorstore = Chroma(persist_directory=DB_FOLDER, embedding_function=embeddings)
-retriever = vectorstore.as_retriever(
-    search_type="similarity",
-    search_kwargs={"k": 3}
-)
+@st.cache_resource
+def init_retriever(api_key):
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/gemini-embedding-001", 
+        google_api_key=api_key
+    )
+    vectorstore = Chroma(persist_directory=DB_FOLDER, embedding_function=embeddings)
+    return vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 3})
+
+llm = init_llm(final_api_key)
+retriever = init_retriever(final_api_key)
 
 
 # ==============================================================================
@@ -200,11 +200,9 @@ class AgentState(TypedDict):
     fallback_mode: bool
     has_ae_component: bool
 
-
 def add_log(current_logs: List[str] | None, message: str) -> List[str]:
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     return (current_logs or []) + [f"[{timestamp}] {message}"]
-
 
 def extract_text(response) -> str:
     content = response.content
@@ -233,7 +231,7 @@ def triage_node(state: AgentState) -> dict:
     Aufgabe 3: Extrahiere den Namen des Absenders am ENDE der E-Mail und bilde die passende Anrede (z.B. "Sehr geehrte Frau Dr. Müller,"). Fallback: "Sehr geehrte Damen und Herren,"
 
     SCHEMA für Kategorie:
-    1. "ADVERSE_EVENT_ONLY": Nebenwirkung, Symptom oder Vorfall. (Floskeln wie "Bitte um Rückmeldung" sind keine medizinische Fachfrage).
+    1. "ADVERSE_EVENT_ONLY": Nebenwirkung, Symptom oder Vorfall. (Floskeln wie "Bitte um Rückmeldung" sind keine med. Fachfrage).
     2. "HYBRID": Vorfall UND konkrete med. Fachfrage (z.B. nach Dosierung, HWZ).
     3. "MEDICAL_INFO": Reine Wissensfrage ohne Patientenbezug/Vorfall.
     4. "OTHER": Spam, Terminvereinbarungen, Dankeschön.
@@ -258,7 +256,7 @@ def triage_node(state: AgentState) -> dict:
         category, language, salutation = "OTHER", "DE", TEMPLATES["DE"]["salutation_fallback"]
 
     if category == "HYBRID" and "?" not in question and "Wirkung" not in question and "Dosierung" not in question:
-         logs = add_log(logs, "TRIAGE: Downgrade von HYBRID zu ADVERSE_EVENT_ONLY (Keine explizite Frage erkannt)")
+         logs = add_log(logs, "TRIAGE: Downgrade von HYBRID zu ADVERSE_EVENT_ONLY (Keine explizite Frage)")
          category = "ADVERSE_EVENT_ONLY"
 
     has_ae = category in ("HYBRID", "ADVERSE_EVENT_ONLY")
@@ -270,7 +268,6 @@ def triage_node(state: AgentState) -> dict:
         "has_ae_component": has_ae,
         "logs": add_log(logs, f"TRIAGE: {category} | {language} | {salutation}"),
     }
-
 
 def adverse_event_node(state: AgentState) -> dict:
     lang = state.get("language", "DE") 
@@ -290,7 +287,6 @@ def adverse_event_node(state: AgentState) -> dict:
         "fallback_mode": False,
         "logs": logs,
     }
-
 
 def retrieve_node(state: AgentState) -> dict:
     query = state["question"]
@@ -317,7 +313,6 @@ def retrieve_node(state: AgentState) -> dict:
         st.error(f"🚨 GOOGLE API FEHLER BEI EMBEDDINGS/RETRIEVAL: {str(e)}")
         return {"documents": [], "context": "", "source_names": [], "fallback_mode": True, "logs": add_log(logs, f"KRITISCHER FEHLER: {str(e)} -> Fallback")}
 
-
 def build_instruction(critique: str | None) -> str:
     base = (
         "Formuliere NUR den inhaltlichen Antwort-Absatz (Body) auf die Frage. "
@@ -328,7 +323,6 @@ def build_instruction(critique: str | None) -> str:
     if critique and critique != "PASS":
         return base + f" Kritik umsetzen: {critique}"
     return base
-
 
 def draft_node(state: AgentState) -> dict:
     question = state["question"]
@@ -355,7 +349,7 @@ def draft_node(state: AgentState) -> dict:
         prompt = f"""
         {instruction} Antworte in der Sprache: {lang}.
         Beantworte die medizinische Frage AUSSCHLIESSLICH basierend auf folgendem Kontext.
-        WICHTIG: Wenn der Kontext nicht zur Frage oder zum genannten Medikament passt, ignoriere ihn und antworte exakt mit: "Leider liegen mir zu dieser spezifischen Frage keine internen Daten vor."
+        WICHTIG: Wenn der Kontext nicht zur Frage oder zum genannten Medikament passt, ignoriere ihn und antworte AUSSCHLIESSLICH mit exakt diesem Code: [NO_CONTEXT]
         
         KONTEXT: {context}
         Frage: {question}
@@ -364,10 +358,16 @@ def draft_node(state: AgentState) -> dict:
     response = llm.invoke([HumanMessage(content=prompt)])
     body_text = extract_text(response)
 
+    # DYNAMISCHER FALLBACK via Token-Erkennung
+    if "[NO_CONTEXT]" in body_text:
+        fallback = True
+        body_text = "Leider liegen mir zu dieser spezifischen Frage keine internen Daten vor."
+        logs = add_log(logs, "DRAFT: Token [NO_CONTEXT] erkannt -> Dynamischer Fallback ausgelöst.")
+
     # Konstruktion der E-Mail
     header = f"{salutation}\n\n{txt['header']}\n\n"
     ae_block = f"{txt['ae_intro']}\n\n{txt['ae_transition']}\n" if has_ae else ""
-    fallback_block = f"{txt['fallback']}\n\n" if fallback or "keine internen Daten vor" in body_text else ""
+    fallback_block = f"{txt['fallback']}\n\n" if fallback else ""
     footer = f"\n\n{txt['footer']}"
     
     final_response = header + ae_block + fallback_block + body_text + footer
@@ -376,8 +376,8 @@ def draft_node(state: AgentState) -> dict:
         "draft": final_response,
         "revision_count": state.get("revision_count", 0) + 1,
         "logs": logs,
+        "fallback_mode": fallback  # Überschreibt den State für den nachfolgenden Critique-Node
     }
-
 
 def critique_node(state: AgentState) -> dict:
     draft = state["draft"]
@@ -387,7 +387,7 @@ def critique_node(state: AgentState) -> dict:
     logs = state.get("logs", [])
 
     if fallback:
-        criteria = "Wurde die Frage konservativ beantwortet? Keine medizinischen Ratschläge ohne Quelle?"
+        criteria = "Der Entwurf ist im Fallback-Modus. Prüfe NUR, ob keine ungedeckten medizinischen Ratschläge gegeben wurden. Wenn der Text angibt, dass 'keine internen Daten vorliegen', ist dies korrekt und MUSS mit 'PASS' bewertet werden."
     elif category == "ADVERSE_EVENT_ONLY":
         criteria = "Enthält die Antwort NUR die Eingangsbestätigung? WICHTIG: Es dürfen KEINE medizinischen Erklärungen oder Datenbank-Infos enthalten sein, da keine Frage gestellt wurde."
     else:
@@ -556,7 +556,7 @@ st.markdown("""
             padding: 1.5rem; border-radius: 10px; border-left: 5px solid #3b82f6; margin-bottom: 2rem;'>
     <h3 style='color: #1e3a8a; margin: 0;'>Intelligente Anfragenbearbeitung mit RAG & Compliance</h4>
     <p style='color: #1e40af; margin: 0.5rem 0 0 0;'>
-            <strong>Features:</strong> Triage • RAG • AE-Warning • Fallback • Quality-check • Human-in-the-loop • Audit-Logging • Log-Download
+            <strong>Features:</strong> Triage • RAG • AE-Warning • Fallback • Quality-check • Human-in-the-loop • Audit-Logging
     </p>
 </div>
 """, unsafe_allow_html=True)
@@ -708,7 +708,7 @@ USED TEXT SNIPPETS (Fed to LLM):
         with col2:
             st.markdown("### 📋 Metadaten")
             if res.get("fallback_mode"):
-                st.info("ℹ️ **Fallback-Modus**\n\nKeine DB-Dokumente gefunden")
+                st.info("ℹ️ **Fallback-Modus**\n\nKeine passenden Dokumente gefunden")
             elif cat != "ADVERSE_EVENT_ONLY":
                 st.success("✅ **Quellen genutzt**")
                 st.markdown("**Verwendete Dokumente:**")
@@ -748,7 +748,7 @@ USED TEXT SNIPPETS (Fed to LLM):
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #64748b; padding: 2rem 0;'>
-    <p style='margin: 0;'>🧬 Medical Affairs AI Agent v5.5 | Powered by LangGraph & Gemini-3.1-Flash-Lite</p>
+    <p style='margin: 0;'>🧬 Medical Affairs AI Agent v5.6 | Powered by LangGraph & Gemini-3.1-Flash-Lite</p>
     <p style='margin: 0.5rem 0 0 0; font-size: 0.9rem;'>
         © 2026 | Dr. Eike Bent Preuß | Medical Affairs Solutions GmbH
     </p>
